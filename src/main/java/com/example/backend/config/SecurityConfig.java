@@ -49,22 +49,14 @@ public class SecurityConfig {
                 // URL Access Rules
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/",
-                                "/index.html",
-                                "/assets/**",
-                                "/*.ico",
-                                "/*.png",
-                                "/*.svg",
-                                "/*.json",
                                 "/api/auth/**",
                                 "/h2-console/**",
                                 "/v3/api-docs/**",
                                 "/v3/api-docs.yaml",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
-                        ).permitAll() // Public routes & frontend static assets
-                        .requestMatchers("/api/**").authenticated() // All other API endpoints require authentication
-                        .anyRequest().permitAll()                   // Frontend SPA routes handled by client router
+                        ).permitAll() // Public routes
+                        .anyRequest().authenticated()                                   // Everything else is private
                 )
 
                 // Stateless session (no HTTP session will be created)
