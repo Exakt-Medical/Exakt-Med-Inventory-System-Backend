@@ -1,0 +1,324 @@
+package com.example.backend.service;
+
+import com.example.backend.dto.inventory.InventoryLedgerHeaderDto;
+import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
+import com.example.backend.dto.inventory.InventorySkuSummaryDto;
+import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
+import com.example.backend.entity.*;
+import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.InventoryTransactionRepository;
+import com.example.backend.repository.SkuRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class InventoryTransactionService {
+
+    private final InventoryTransactionRepository inventoryTransactionRepository;
+    private final SkuRepository skuRepository;
+    private final FacilityRepository facilityRepository;
+
+    public InventoryTransactionService(InventoryTransactionRepository inventoryTransactionRepository,
+                                     SkuRepository skuRepository,
+                                     FacilityRepository facilityRepository) {
+        this.inventoryTransactionRepository = inventoryTransactionRepository;
+        this.skuRepository = skuRepository;
+        this.facilityRepository = facilityRepository;
+    }
+
+    /**
+     * Pure logging service - records an immutable inventory transaction event.
+     * Note: This does NOT modify SKU units, as SkuService / BatchService manages unit calculations.
+     */
+    @Transactional
+    public InventoryTransaction recordTransaction(Sku sku,
+                                                  Facility facility,
+                                                  Batch batch,
+                                                  User user,
+                                                  InventoryTransaction.Type type,
+                                                  String referenceNumber,
+                                                  String batchNum,
+                                                  LocalDate expiryDate,
+                                                  Long quantityIn,
+                                                  Long quantityOut,
+                                                  Long previousBalance,
+                                                  Long balanceAfter,
+                                                  String reason,
+                                                  String notes,
+                                                  LocalDateTime createdAt) {
+        return recordTransaction(sku, facility, batch, user, null, type, referenceNumber, batchNum, expiryDate,
+                quantityIn, quantityOut, previousBalance, balanceAfter, reason, notes, createdAt);
+    }
+
+    @Transactional
+    public InventoryTransaction recordTransaction(Sku sku,
+                                                  Facility facility,
+                                                  Batch batch,
+                                                  User user,
+                                                  String authorizedBy,
+                                                  InventoryTransaction.Type type,
+                                                  String referenceNumber,
+                                                  String batchNum,
+                                                  LocalDate expiryDate,
+                                                  Long quantityIn,
+                                                  Long quantityOut,
+                                                  Long previousBalance,
+                                                  Long balanceAfter,
+                                                  String reason,
+                                                  String notes,
+                                                  LocalDateTime createdAt) {
+        if (sku == null) {
+            throw new IllegalArgumentException("SKU is required to log an inventory transaction.");
+        }
+        if (facility == null) {
+            facility = sku.getFacility();
+        }
+        if (facility == null) {
+            throw new IllegalArgumentException("Facility is required to log an inventory transaction.");
+        }
+
+        String resolvedAuthorizedBy = authorizedBy != null && !authorizedBy.isBlank() ? authorizedBy.trim() : null;
+        if (resolvedAuthorizedBy == null && user != null) {
+            resolvedAuthorizedBy = user.getName() != null && !user.getName().isBlank()
+                    ? user.getName().trim()
+                    : (user.getUsername() != null ? user.getUsername().trim() : null);
+        }
+
+        InventoryTransaction tx = InventoryTransaction.builder()
+                .facility(facility)
+                .sku(sku)
+                .batch(batch)
+                .user(user)
+                .authorizedBy(resolvedAuthorizedBy)
+                .transactionType(type)
+                .referenceNumber(referenceNumber)
+                .batchNum(batchNum != null ? batchNum : (batch != null ? batch.getBatchNum() : null))
+                .expiryDate(expiryDate != null ? expiryDate : (batch != null ? batch.getExpiryDate() : null))
+                .quantityIn(quantityIn != null && quantityIn > 0 ? quantityIn : null)
+                .quantityOut(quantityOut != null && quantityOut > 0 ? quantityOut : null)
+                .previousBalance(previousBalance != null ? previousBalance : 0L)
+                .balanceAfter(balanceAfter != null ? balanceAfter : 0L)
+                .reason(reason != null && !reason.isBlank() ? reason : type.getLabel())
+                .notes(notes)
+                .createdAt(createdAt != null ? createdAt : LocalDateTime.now())
+                .build();
+
+        return inventoryTransactionRepository.save(tx);
+    }
+
+    /**
+     * Retrieves the complete chronological ledger for a SKU (Bin Card equivalent).
+     */
+    @Transactional(readOnly = true)
+    public InventoryLedgerResponseDto getLedgerForSku(Long facilityId, Long skuId, LocalDate startDate, LocalDate endDate) {
+        if (facilityId == null) {
+            throw new IllegalArgumentException("Facility ID is required.");
+        }
+        if (skuId == null) {
+            throw new IllegalArgumentException("SKU ID is required.");
+        }
+
+        facilityRepository.findById(facilityId)
+                .orElseThrow(() -> new RuntimeException("Facility not found with id: " + facilityId));
+
+        Sku sku = skuRepository.findById(skuId)
+                .orElseThrow(() -> new RuntimeException("SKU not found with id: " + skuId));
+
+        if (sku.getFacility() != null && !sku.getFacility().getId().equals(facilityId)) {
+            throw new RuntimeException("SKU " + skuId + " does not belong to facility " + facilityId);
+        }
+
+        List<InventoryTransaction> transactions;
+        if (startDate != null && endDate != null) {
+            LocalDateTime startDateTime = startDate.atStartOfDay();
+            LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
+            transactions = inventoryTransactionRepository
+                    .findByFacilityIdAndSkuIdAndCreatedAtBetweenOrderByCreatedAtDesc(facilityId, skuId, startDateTime, endDateTime);
+        } else {
+            transactions = inventoryTransactionRepository
+                    .findByFacilityIdAndSkuIdOrderByCreatedAtDesc(facilityId, skuId);
+        }
+
+        long totalReceived = 0;
+        long totalDeducted = 0;
+
+        for (InventoryTransaction tx : transactions) {
+            if (tx.getQuantityIn() != null && tx.getQuantityIn() > 0) {
+                totalReceived += tx.getQuantityIn();
+            }
+            if (tx.getQuantityOut() != null && tx.getQuantityOut() > 0) {
+                totalDeducted += tx.getQuantityOut();
+            }
+        }
+
+        long currentStock = sku.getUnits() != null ? sku.getUnits() : 0L;
+        long min = sku.getMinimumLevel() != null ? sku.getMinimumLevel() : 0L;
+        long reorder = sku.getReorderLevel() != null ? sku.getReorderLevel() : 0L;
+
+        String stockStatus = "NORMAL";
+        if (currentStock <= 0) {
+            stockStatus = "OUT_OF_STOCK";
+        } else if (currentStock <= min) {
+            stockStatus = "CRITICAL_MINIMUM";
+        } else if (currentStock <= reorder) {
+            stockStatus = "REORDER_TRIGGERED";
+        }
+
+        String brand = sku.getBrandName() != null ? sku.getBrandName() : "";
+        String gen = sku.getLibMedicine() != null && sku.getLibMedicine().getDrugDescription() != null
+                ? sku.getLibMedicine().getDrugDescription()
+                : "";
+
+        InventoryLedgerHeaderDto header = InventoryLedgerHeaderDto.builder()
+                .skuId(sku.getId())
+                .name(sku.getName())
+                .brandName(brand)
+                .genericName(gen)
+                .dosageForm(sku.getDosageForm())
+                .dosage(sku.getDosageStrength())
+                .packagingUnit(sku.getPackagingUnit())
+                .minimumLevel(sku.getMinimumLevel())
+                .reorderLevel(sku.getReorderLevel())
+                .maximumLevel(sku.getMaximumLevel())
+                .currentUnits(currentStock)
+                .stockStatus(stockStatus)
+                .totalReceived(totalReceived)
+                .totalDeducted(totalDeducted)
+                .build();
+
+        List<InventoryTransactionResponseDto> entries = transactions.stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toList());
+
+        return InventoryLedgerResponseDto.builder()
+                .header(header)
+                .entries(entries)
+                .build();
+    }
+
+    /**
+     * Dropdown list of SKUs for the Ledger / Bin Card selection.
+     */
+    @Transactional(readOnly = true)
+    public List<InventorySkuSummaryDto> getSkusForLedger(Long facilityId) {
+        if (facilityId == null) {
+            throw new IllegalArgumentException("Facility ID is required.");
+        }
+
+        return skuRepository.findByFacilityId(facilityId).stream()
+                .map(sku -> {
+                    String gen = sku.getLibMedicine() != null && sku.getLibMedicine().getDrugDescription() != null
+                            ? sku.getLibMedicine().getDrugDescription()
+                            : "";
+                    return InventorySkuSummaryDto.builder()
+                            .id(sku.getId())
+                            .sku(sku.getName())
+                            .name(sku.getName())
+                            .brandName(sku.getBrandName())
+                            .genericName(gen)
+                            .dosage(sku.getDosageStrength())
+                            .currentStock(sku.getUnits() != null ? sku.getUnits() : 0L)
+                            .packagingUnit(sku.getPackagingUnit())
+                            .build();
+                })
+                .sorted(Comparator.comparing(s -> s.getName() != null ? s.getName() : "", String.CASE_INSENSITIVE_ORDER))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Retrieves transactions by facility with optional type filter.
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryTransactionResponseDto> getTransactionsByFacility(Long facilityId, List<InventoryTransaction.Type> types) {
+        if (facilityId == null) {
+            throw new IllegalArgumentException("Facility ID is required.");
+        }
+
+        List<InventoryTransaction> list;
+        if (types != null && !types.isEmpty()) {
+            list = inventoryTransactionRepository.findByFacilityIdAndTransactionTypeInOrderByCreatedAtDesc(facilityId, types);
+        } else {
+            list = inventoryTransactionRepository.findByFacilityIdOrderByCreatedAtDesc(facilityId);
+        }
+
+        return list.stream().map(this::mapToDto).collect(Collectors.toList());
+    }
+
+    /**
+     * Retrieves transactions by SKU with optional type filter.
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryTransactionResponseDto> getTransactionsBySku(Long skuId, List<InventoryTransaction.Type> types) {
+        if (skuId == null) {
+            throw new IllegalArgumentException("SKU ID is required.");
+        }
+
+        List<InventoryTransaction> list;
+        if (types != null && !types.isEmpty()) {
+            list = inventoryTransactionRepository.findBySkuIdAndTransactionTypeInOrderByCreatedAtDesc(skuId, types);
+        } else {
+            list = inventoryTransactionRepository.findByFacilityIdAndSkuIdOrderByCreatedAtDesc(null, skuId);
+        }
+
+        return list.stream().map(this::mapToDto).collect(Collectors.toList());
+    }
+
+    public InventoryTransactionResponseDto mapToDto(InventoryTransaction tx) {
+        Sku sku = tx.getSku();
+        Facility fac = tx.getFacility();
+        User u = tx.getUser();
+
+        String userName = "System";
+        String userRole = "System";
+        if (tx.getAuthorizedBy() != null && !tx.getAuthorizedBy().isBlank()) {
+            userName = tx.getAuthorizedBy().trim();
+            userRole = u != null && u.getRole() != null ? u.getRole().name() : "Authorized Person";
+        } else if (u != null) {
+            userName = u.getName() != null && !u.getName().isBlank()
+                    ? u.getName()
+                    : (u.getUsername() != null ? u.getUsername() : "User #" + u.getId());
+            userRole = u.getRole() != null ? u.getRole().name() : "User";
+        }
+
+        String gen = sku != null && sku.getLibMedicine() != null && sku.getLibMedicine().getDrugDescription() != null
+                ? sku.getLibMedicine().getDrugDescription()
+                : null;
+        String dosageStr = sku != null ? sku.getDosageStrength() : null;
+
+        return InventoryTransactionResponseDto.builder()
+                .id(tx.getId())
+                .skuId(sku != null ? sku.getId() : null)
+                .skuCode(sku != null ? sku.getName() : "-")
+                .brandName(sku != null ? sku.getBrandName() : null)
+                .genericName(gen)
+                .dosage(dosageStr)
+                .packagingUnit(sku != null ? sku.getPackagingUnit() : null)
+                .facilityId(fac != null ? fac.getId() : null)
+                .facilityName(fac != null ? fac.getName() : null)
+                .userId(u != null ? u.getId() : null)
+                .userName(userName.trim())
+                .authorizedBy(userName.trim())
+                .performedBy(userName.trim())
+                .userRole(userRole)
+                .transactionType(tx.getTransactionType())
+                .typeLabel(tx.getTransactionType() != null ? tx.getTransactionType().getLabel() : "-")
+                .referenceNumber(tx.getReferenceNumber())
+                .batchNum(tx.getBatchNum())
+                .expiryDate(tx.getExpiryDate())
+                .quantityIn(tx.getQuantityIn())
+                .quantityOut(tx.getQuantityOut())
+                .previousBalance(tx.getPreviousBalance())
+                .balanceAfter(tx.getBalanceAfter())
+                .reason(tx.getReason())
+                .notes(tx.getNotes())
+                .createdAt(tx.getCreatedAt())
+                .build();
+    }
+}
