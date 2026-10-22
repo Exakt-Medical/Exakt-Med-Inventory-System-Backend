@@ -198,13 +198,18 @@ public class LibLocationService {
         if (storageType == null) {
             return "LOC";
         }
-        return switch (storageType) {
-            case ROOM_TEMPERATURE -> "SHF";
-            case COLD_STORAGE -> "REF";
-            case FREEZER -> "FRZ";
-            case HAZARDOUS -> "HAZ";
-            case OTHER -> "LOC";
-        };
+        switch (storageType) {
+            case ROOM_TEMPERATURE:
+                return "SHF";
+            case COLD_STORAGE:
+                return "REF";
+            case FREEZER:
+                return "FRZ";
+            case HAZARDOUS:
+                return "HAZ";
+            default:
+                return "LOC";
+        }
     }
 
     private LibLocationResponseDto mapToDto(LibLocation location) {

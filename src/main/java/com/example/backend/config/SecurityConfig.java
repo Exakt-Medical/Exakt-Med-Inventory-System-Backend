@@ -28,9 +28,12 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final com.example.backend.security.OneRxApiKeyFilter oneRxApiKeyFilter;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter,
+                          com.example.backend.security.OneRxApiKeyFilter oneRxApiKeyFilter) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.oneRxApiKeyFilter = oneRxApiKeyFilter;
     }
 
     // 1. Define HTTP Security Rules (Routes, Filter chain, Session management)
@@ -64,7 +67,8 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
-                // Add our JWT filter before Spring's default username/password filter
+                // Add OneRx API Key filter before JWT filter, then JWT filter before username/password filter
+                .addFilterBefore(oneRxApiKeyFilter, JwtAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
