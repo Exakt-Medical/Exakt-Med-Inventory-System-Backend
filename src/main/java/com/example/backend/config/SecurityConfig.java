@@ -67,9 +67,9 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
 
-                // Add OneRx API Key filter before JWT filter, then JWT filter before username/password filter
-                .addFilterBefore(oneRxApiKeyFilter, JwtAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                // Add OneRx API Key filter before username/password filter, and JWT filter after it
+                .addFilterBefore(oneRxApiKeyFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

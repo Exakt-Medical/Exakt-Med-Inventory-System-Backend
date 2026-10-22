@@ -29,6 +29,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
+        // 0. If request is already authenticated (e.g. by OneRxApiKeyFilter), proceed directly
+        if (SecurityContextHolder.getContext().getAuthentication() != null) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // 1. Read the Authorization header
         String authHeader = request.getHeader("Authorization");
 
