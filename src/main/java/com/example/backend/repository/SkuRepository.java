@@ -96,4 +96,16 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
     List<Sku> findAvailableSkusByDrugCodeAndFacilityId(
             @Param("drugCode") String drugCode,
             @Param("facilityId") Long facilityId);
+
+    // 6. Query available SKUs by multiple drugCodes and facilityId
+    @Query("SELECT s FROM Sku s " +
+           "JOIN FETCH s.libMedicine m " +
+           "JOIN FETCH s.facility f " +
+           "WHERE m.drugCode IN :drugCodes " +
+           "  AND f.id = :facilityId " +
+           "  AND s.units > 0 " +
+           "ORDER BY m.drugCode ASC, s.brandName ASC")
+    List<Sku> findAvailableSkusByDrugCodesAndFacilityId(
+            @Param("drugCodes") java.util.Collection<String> drugCodes,
+            @Param("facilityId") Long facilityId);
 }

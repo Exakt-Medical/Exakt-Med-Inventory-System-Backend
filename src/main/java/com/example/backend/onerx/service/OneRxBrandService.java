@@ -30,63 +30,131 @@ public class OneRxBrandService {
     }
 
     /**
-     * Resolves available brand SKUs for OneRx integration.
-     *
-     * @param drugCode     the generic drug code (e.g. "DRG-000123")
-     * @param facilityCode the facility code (e.g. "FAC-001")
-     * @return OneRxBrandResponseDto containing drug details and available SKU stock
+     * Resolves available brand SKUs for a single drug code.
      */
     @Transactional(readOnly = true)
     public OneRxBrandResponseDto getAvailableBrands(String drugCode, String facilityCode) {
         if (drugCode == null || drugCode.trim().isBlank()) {
             throw new IllegalArgumentException("Parameter 'drug_code' is required.");
         }
+        List<OneRxBrandResponseDto> results = getAvailableBrandsForMultipleDrugs(List.of(drugCode), facilityCode);
+        return results.isEmpty() ? null : results.get(0);
+    }
+
+    /**
+     * Resolves available brand SKUs for comma-separated drug codes.
+     */
+    @Transactional(readOnly = true)
+    public List<OneRxBrandResponseDto> getAvailableBrandsForCommaSeparatedDrugs(String drugCodeParam, String facilityCode) {
+        if (drugCodeParam == null || drugCodeParam.trim().isBlank()) {
+            throw new IllegalArgumentException("Parameter 'drug_code' is required.");
+        }
+        return getAvailableBrandsForMultipleDrugs(List.of(drugCodeParam), facilityCode);
+    }
+
+    /**
+     * Resolves available brand SKUs for multiple generic drug codes in a facility.
+     *
+     * @param drugCodes    list or comma-separated list of drug codes (e.g. ["DRG-001", "DRG-002"])
+     * @param facilityCode the facility code (e.g. "FAC-001")
+     * @return List of OneRxBrandResponseDto, one entry per requested drug code
+     */
+    @Transactional(readOnly = true)
+    public List<OneRxBrandResponseDto> getAvailableBrandsForMultipleDrugs(List<String> drugCodes, String facilityCode) {
         if (facilityCode == null || facilityCode.trim().isBlank()) {
             throw new IllegalArgumentException("Parameter 'facility_code' is required.");
         }
 
-        String trimmedDrugCode = drugCode.trim();
+        // 1. Parse, clean, split comma-separated codes, and deduplicate preserving order
+        java.util.Set<String> distinctCodes = new java.util.LinkedHashSet<>();
+        if (drugCodes != null) {
+            for (String rawCode : drugCodes) {
+                if (rawCode != null) {
+                    for (String part : rawCode.split(",")) {
+                        String trimmed = part.trim();
+                        if (!trimmed.isBlank()) {
+                            distinctCodes.add(trimmed);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (distinctCodes.isEmpty()) {
+            throw new IllegalArgumentException("At least one valid 'drug_code' is required.");
+        }
+
         String trimmedFacilityCode = facilityCode.trim();
 
-        // 1. Resolve Facility (by facilityCode first, then numeric ID fallback)
+        // 2. Resolve Facility
         Facility facility = resolveFacility(trimmedFacilityCode)
                 .orElseThrow(() -> new RuntimeException("Facility not found with code: " + trimmedFacilityCode));
 
-        // 2. Resolve LibMedicine
-        LibMedicine medicine = libMedicineRepository.findByDrugCode(trimmedDrugCode)
-                .orElseThrow(() -> new RuntimeException("Drug code not found in medicine library: " + trimmedDrugCode));
+        // 3. Resolve all LibMedicines
+        List<LibMedicine> medicines = libMedicineRepository.findByDrugCodeIn(distinctCodes);
+        java.util.Map<String, LibMedicine> medicineMap = medicines.stream()
+                .collect(Collectors.toMap(LibMedicine::getDrugCode, m -> m, (a, b) -> a));
 
-        // 3. Query all available SKUs in the facility for this drug (units > 0)
-        List<Sku> availableSkus = skuRepository.findAvailableSkusByDrugCodeAndFacilityId(
-                medicine.getDrugCode(),
+        // Validate that requested drug codes exist in the medicine library
+        for (String code : distinctCodes) {
+            if (!medicineMap.containsKey(code)) {
+                throw new RuntimeException("Drug code not found in medicine library: " + code);
+            }
+        }
+
+        // 4. Query all available SKUs in the facility for these drugs (units > 0)
+        List<Sku> availableSkus = skuRepository.findAvailableSkusByDrugCodesAndFacilityId(
+                distinctCodes,
                 facility.getId()
         );
 
-        // 4. Map into OneRx response structure
-        List<OneRxBrandResponseDto.SkuBrandItemDto> skuItems = availableSkus.stream()
-                .map(sku -> OneRxBrandResponseDto.SkuBrandItemDto.builder()
-                        .name(sku.getName())
-                        .brandName(sku.getBrandName())
-                        .quantity(sku.getUnits() != null ? sku.getUnits() : 0L)
-                        .packagingUnit(sku.getPackagingUnit())
-                        .dosageForm(sku.getDosageForm())
-                        .dosageStrength(sku.getDosageStrength())
-                        .build())
-                .collect(Collectors.toList());
+        // Group SKUs by drugCode
+        java.util.Map<String, List<Sku>> skusByDrugCode = availableSkus.stream()
+                .filter(sku -> sku.getLibMedicine() != null && sku.getLibMedicine().getDrugCode() != null)
+                .collect(Collectors.groupingBy(sku -> sku.getLibMedicine().getDrugCode()));
 
         String displayFacilityCode = (facility.getFacilityCode() != null && !facility.getFacilityCode().isBlank())
                 ? facility.getFacilityCode()
                 : String.valueOf(facility.getId());
 
-        return OneRxBrandResponseDto.builder()
-                .drugCode(medicine.getDrugCode())
-                .drugName(medicine.getDrugDescription())
-                .facilityCode(displayFacilityCode)
-                .sku(skuItems)
-                .build();
+        // 5. Build response list matching the requested order
+        List<OneRxBrandResponseDto> responseList = new java.util.ArrayList<>();
+        for (String code : distinctCodes) {
+            LibMedicine medicine = medicineMap.get(code);
+            List<Sku> skusForDrug = skusByDrugCode.getOrDefault(code, java.util.Collections.emptyList());
+
+            List<OneRxBrandResponseDto.SkuBrandItemDto> skuItems = skusForDrug.stream()
+                    .map(sku -> OneRxBrandResponseDto.SkuBrandItemDto.builder()
+                            .name(sku.getName())
+                            .brandName(sku.getBrandName())
+                            .quantity(sku.getUnits() != null ? sku.getUnits() : 0L)
+                            .packagingUnit(sku.getPackagingUnit())
+                            .dosageForm(sku.getDosageForm())
+                            .dosageStrength(sku.getDosageStrength())
+                            .build())
+                    .collect(Collectors.toList());
+
+            responseList.add(OneRxBrandResponseDto.builder()
+                    .drugCode(medicine.getDrugCode())
+                    .drugName(medicine.getDrugDescription())
+                    .facilityCode(displayFacilityCode)
+                    .sku(skuItems)
+                    .build());
+        }
+
+        return responseList;
     }
 
     private Optional<Facility> resolveFacility(String facilityCode) {
-        return facilityRepository.findByFacilityCode(facilityCode);
+        Optional<Facility> opt = facilityRepository.findByFacilityCode(facilityCode);
+        if (opt.isPresent()) {
+            return opt;
+        }
+        try {
+            Long numericId = Long.parseLong(facilityCode);
+            return facilityRepository.findById(numericId);
+        } catch (NumberFormatException ignored) {
+            return Optional.empty();
+        }
     }
 }

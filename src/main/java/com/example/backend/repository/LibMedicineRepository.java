@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -21,4 +22,6 @@ public interface LibMedicineRepository extends JpaRepository<LibMedicine, Long> 
     Page<LibMedicine> searchMedicines(@Param("search") String search, Pageable pageable);
 
     Optional<LibMedicine> findByDrugCode(String drugCode);
+
+    List<LibMedicine> findByDrugCodeIn(java.util.Collection<String> drugCodes);
 }
