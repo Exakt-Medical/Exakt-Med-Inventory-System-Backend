@@ -249,7 +249,7 @@ public class SkuService {
         }
     }
 
-    public PackagingInfo resolvePackaging(SkuRequestDto request, LibMedicine med) {
+    public PackagingInfo    resolvePackaging(SkuRequestDto request, LibMedicine med) {
         // 1. If packagingUnitCode provided, look up in lib_packaging_unit
         if (request.getPackagingUnitCode() != null && !request.getPackagingUnitCode().trim().isEmpty()) {
             Optional<LibPackagingUnit> opt = libPackagingUnitRepository.findByCode(request.getPackagingUnitCode().trim().toUpperCase());

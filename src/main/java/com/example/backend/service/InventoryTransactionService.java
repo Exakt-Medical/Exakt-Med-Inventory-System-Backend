@@ -1,13 +1,19 @@
 package com.example.backend.service;
 
+import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.inventory.InventoryLedgerHeaderDto;
 import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
 import com.example.backend.dto.inventory.InventorySkuSummaryDto;
 import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
+import com.example.backend.dto.inventory.InventoryTransactionSummaryDto;
 import com.example.backend.entity.*;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.SkuRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -233,41 +239,78 @@ public class InventoryTransactionService {
     }
 
     /**
-     * Retrieves transactions by facility with optional type filter.
+     * Retrieves transactions with server-side pagination, optional facility/sku scoping, and type/search filters.
      */
     @Transactional(readOnly = true)
-    public List<InventoryTransactionResponseDto> getTransactionsByFacility(Long facilityId, List<InventoryTransaction.Type> types) {
+    public PageResponseDto<InventoryTransactionResponseDto> getTransactionsPaginated(
+            Long facilityId,
+            Long skuId,
+            List<InventoryTransaction.Type> types,
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+
         if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is required.");
+            throw new IllegalArgumentException("Facility ID is strictly required to query inventory transactions.");
         }
 
-        List<InventoryTransaction> list;
-        if (types != null && !types.isEmpty()) {
-            list = inventoryTransactionRepository.findByFacilityIdAndTransactionTypeInOrderByCreatedAtDesc(facilityId, types);
-        } else {
-            list = inventoryTransactionRepository.findByFacilityIdOrderByCreatedAtDesc(facilityId);
-        }
+        Sort.Direction direction = "ASC".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        String sortProperty = ("referenceNumber".equalsIgnoreCase(sortBy) || "transactionType".equalsIgnoreCase(sortBy))
+                ? sortBy : "createdAt";
 
-        return list.stream().map(this::mapToDto).collect(Collectors.toList());
+        int pageIndex = Math.max(0, page);
+        int pageSize = size > 0 ? size : 10;
+        Pageable pageable = PageRequest.of(pageIndex, pageSize, Sort.by(direction, sortProperty));
+
+        List<InventoryTransaction.Type> filterTypes = (types != null && !types.isEmpty()) ? types : null;
+        String cleanSearch = (search != null && !search.trim().isBlank()) ? search.trim() : null;
+
+        Page<InventoryTransaction> txPage = inventoryTransactionRepository.findTransactionsPaginated(
+                facilityId, skuId, filterTypes, cleanSearch, pageable);
+
+        Page<InventoryTransactionResponseDto> dtoPage = txPage.map(this::mapToDto);
+        return PageResponseDto.from(dtoPage);
     }
 
     /**
-     * Retrieves transactions by SKU with optional type filter.
+     * Retrieves aggregated transaction KPI metrics across the facility (optionally filtered by transaction types).
      */
     @Transactional(readOnly = true)
-    public List<InventoryTransactionResponseDto> getTransactionsBySku(Long skuId, List<InventoryTransaction.Type> types) {
-        if (skuId == null) {
-            throw new IllegalArgumentException("SKU ID is required.");
+    public InventoryTransactionSummaryDto getTransactionSummary(Long facilityId, List<InventoryTransaction.Type> types) {
+        if (facilityId == null) {
+            throw new IllegalArgumentException("Facility ID is strictly required to query inventory transaction summary.");
         }
 
-        List<InventoryTransaction> list;
-        if (types != null && !types.isEmpty()) {
-            list = inventoryTransactionRepository.findBySkuIdAndTransactionTypeInOrderByCreatedAtDesc(skuId, types);
-        } else {
-            list = inventoryTransactionRepository.findByFacilityIdAndSkuIdOrderByCreatedAtDesc(null, skuId);
+        List<InventoryTransaction.Type> filterTypes = (types != null && !types.isEmpty()) ? types : null;
+        List<Object[]> rows = inventoryTransactionRepository.getTransactionSummaryByFacility(facilityId, filterTypes);
+
+        long totalLogs = 0;
+        long additionsUnits = 0;
+        long additionsCount = 0;
+        long deductionsUnits = 0;
+        long deductionsCount = 0;
+
+        if (rows != null && !rows.isEmpty() && rows.get(0) != null) {
+            Object[] row = rows.get(0);
+            totalLogs = row[0] != null ? ((Number) row[0]).longValue() : 0L;
+            additionsUnits = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+            additionsCount = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+            deductionsUnits = row[3] != null ? ((Number) row[3]).longValue() : 0L;
+            deductionsCount = row[4] != null ? ((Number) row[4]).longValue() : 0L;
         }
 
-        return list.stream().map(this::mapToDto).collect(Collectors.toList());
+        long netDelta = additionsUnits - deductionsUnits;
+
+        return InventoryTransactionSummaryDto.builder()
+                .totalLogs(totalLogs)
+                .netDelta(netDelta)
+                .additionsUnits(additionsUnits)
+                .additionsCount(additionsCount)
+                .deductionsUnits(deductionsUnits)
+                .deductionsCount(deductionsCount)
+                .build();
     }
 
     public InventoryTransactionResponseDto mapToDto(InventoryTransaction tx) {

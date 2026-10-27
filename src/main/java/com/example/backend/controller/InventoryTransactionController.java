@@ -1,8 +1,10 @@
 package com.example.backend.controller;
 
+import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
 import com.example.backend.dto.inventory.InventorySkuSummaryDto;
 import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
+import com.example.backend.dto.inventory.InventoryTransactionSummaryDto;
 import com.example.backend.entity.InventoryTransaction;
 import com.example.backend.service.InventoryTransactionService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -53,27 +55,65 @@ public class InventoryTransactionController {
         return ResponseEntity.ok(inventoryTransactionService.getSkusForLedger(facilityId));
     }
 
-    // 3. GET TRANSACTIONS BY FACILITY (WITH OPTIONAL TYPE FILTER)
+    // 3. GET TRANSACTIONS (PAGINATED, WITH OPTIONAL FACILITY, SKU, TYPE, AND KEYWORD FILTERS)
     @GetMapping
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
-    @Operation(summary = "Get Inventory Transactions by Facility", description = "Retrieves transactions across the facility, optionally filtered by transaction types.")
-    public ResponseEntity<List<InventoryTransactionResponseDto>> getTransactionsByFacility(
+    @Operation(summary = "Get Inventory Transactions Paginated", description = "Retrieves paginated transactions across the facility, optionally filtered by SKU, transaction types and search keyword.")
+    public ResponseEntity<PageResponseDto<InventoryTransactionResponseDto>> getTransactions(
+            @Parameter(description = "Operating facility ID", required = true)
+            @RequestParam Long facilityId,
+            @Parameter(description = "Optional SKU ID filter")
+            @RequestParam(required = false) Long skuId,
+            @Parameter(description = "Optional transaction type filter (e.g. ADJUSTMENT_ADD, ADJUSTMENT_SUB, DISPENSE)")
+            @RequestParam(required = false) List<InventoryTransaction.Type> types,
+            @Parameter(description = "Optional keyword search across reference, batchNum, SKU name, or reason")
+            @RequestParam(required = false) String search,
+            @Parameter(description = "Page index (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size")
+            @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "Sort property (createdAt, referenceNumber, transactionType)")
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @Parameter(description = "Sort direction (ASC, DESC)")
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        return ResponseEntity.ok(inventoryTransactionService.getTransactionsPaginated(
+                facilityId, skuId, types, search, page, size, sortBy, sortDir));
+    }
+
+    // 4. GET TRANSACTIONS BY SKU (PAGINATED)
+    @GetMapping("/sku/{skuId}")
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
+    @Operation(summary = "Get Inventory Transactions by SKU (Paginated)", description = "Retrieves paginated transactions for a specific SKU, scoped to the facility.")
+    public ResponseEntity<PageResponseDto<InventoryTransactionResponseDto>> getTransactionsBySku(
+            @Parameter(description = "SKU ID", required = true)
+            @PathVariable Long skuId,
+            @Parameter(description = "Operating facility ID", required = true)
+            @RequestParam Long facilityId,
+            @Parameter(description = "Optional transaction type filter")
+            @RequestParam(required = false) List<InventoryTransaction.Type> types,
+            @Parameter(description = "Optional keyword search")
+            @RequestParam(required = false) String search,
+            @Parameter(description = "Page index (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size")
+            @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "Sort property (createdAt, referenceNumber, transactionType)")
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @Parameter(description = "Sort direction (ASC, DESC)")
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        return ResponseEntity.ok(inventoryTransactionService.getTransactionsPaginated(
+                facilityId, skuId, types, search, page, size, sortBy, sortDir));
+    }
+
+    // 5. GET TRANSACTION SUMMARY KPIS
+    @GetMapping("/summary")
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
+    @Operation(summary = "Get Inventory Transaction Summary KPIs", description = "Returns aggregated facility-level transaction metrics (additions, deductions, net delta) for KPI cards.")
+    public ResponseEntity<InventoryTransactionSummaryDto> getTransactionSummary(
             @Parameter(description = "Operating facility ID", required = true)
             @RequestParam Long facilityId,
             @Parameter(description = "Optional transaction type filter (e.g. ADJUSTMENT_ADD, ADJUSTMENT_SUB, DISPENSE)")
             @RequestParam(required = false) List<InventoryTransaction.Type> types) {
-        return ResponseEntity.ok(inventoryTransactionService.getTransactionsByFacility(facilityId, types));
-    }
-
-    // 4. GET TRANSACTIONS BY SKU
-    @GetMapping("/sku/{skuId}")
-    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
-    @Operation(summary = "Get Inventory Transactions by SKU", description = "Retrieves transactions for a specific SKU, optionally filtered by transaction types.")
-    public ResponseEntity<List<InventoryTransactionResponseDto>> getTransactionsBySku(
-            @Parameter(description = "SKU ID", required = true)
-            @PathVariable Long skuId,
-            @Parameter(description = "Optional transaction type filter")
-            @RequestParam(required = false) List<InventoryTransaction.Type> types) {
-        return ResponseEntity.ok(inventoryTransactionService.getTransactionsBySku(skuId, types));
+        return ResponseEntity.ok(inventoryTransactionService.getTransactionSummary(facilityId, types));
     }
 }
