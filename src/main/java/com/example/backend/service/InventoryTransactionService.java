@@ -3,7 +3,6 @@ package com.example.backend.service;
 import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.inventory.InventoryLedgerHeaderDto;
 import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
-import com.example.backend.dto.inventory.InventorySkuSummaryDto;
 import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
 import com.example.backend.dto.inventory.InventoryTransactionSummaryDto;
 import com.example.backend.entity.*;
@@ -209,34 +208,6 @@ public class InventoryTransactionService {
                 .build();
     }
 
-    /**
-     * Dropdown list of SKUs for the Ledger / Bin Card selection.
-     */
-    @Transactional(readOnly = true)
-    public List<InventorySkuSummaryDto> getSkusForLedger(Long facilityId) {
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is required.");
-        }
-
-        return skuRepository.findByFacilityId(facilityId).stream()
-                .map(sku -> {
-                    String gen = sku.getLibMedicine() != null && sku.getLibMedicine().getDrugDescription() != null
-                            ? sku.getLibMedicine().getDrugDescription()
-                            : "";
-                    return InventorySkuSummaryDto.builder()
-                            .id(sku.getId())
-                            .sku(sku.getName())
-                            .name(sku.getName())
-                            .brandName(sku.getBrandName())
-                            .genericName(gen)
-                            .dosage(sku.getDosageStrength())
-                            .currentStock(sku.getUnits() != null ? sku.getUnits() : 0L)
-                            .packagingUnit(sku.getPackagingUnit())
-                            .build();
-                })
-                .sorted(Comparator.comparing(s -> s.getName() != null ? s.getName() : "", String.CASE_INSENSITIVE_ORDER))
-                .collect(Collectors.toList());
-    }
 
     /**
      * Retrieves transactions with server-side pagination, optional facility/sku scoping, and type/search filters.

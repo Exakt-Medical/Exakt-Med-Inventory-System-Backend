@@ -14,8 +14,10 @@ import lombok.Setter;
 public class SkuDropdownDto {
     private Long id;
     private String sku;
+    private String name;
     private String brandName;
     private String genericName;
+    private String packagingUnit;
     private String dosage;
     private Long currentStock;
     private Long maximumLevel;

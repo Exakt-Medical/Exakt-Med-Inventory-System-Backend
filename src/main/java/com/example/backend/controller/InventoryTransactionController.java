@@ -2,7 +2,6 @@ package com.example.backend.controller;
 
 import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
-import com.example.backend.dto.inventory.InventorySkuSummaryDto;
 import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
 import com.example.backend.dto.inventory.InventoryTransactionSummaryDto;
 import com.example.backend.entity.InventoryTransaction;
@@ -43,16 +42,6 @@ public class InventoryTransactionController {
             @Parameter(description = "Optional end date filter (YYYY-MM-DD)")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         return ResponseEntity.ok(inventoryTransactionService.getLedgerForSku(facilityId, skuId, startDate, endDate));
-    }
-
-    // 2. GET SKUS FOR LEDGER DROPDOWN
-    @GetMapping("/skus")
-    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
-    @Operation(summary = "Get Facility SKUs for Ledger", description = "Retrieves active SKUs within the facility to populate the Bin Card selection dropdown.")
-    public ResponseEntity<List<InventorySkuSummaryDto>> getFacilitySkusForLedger(
-            @Parameter(description = "Operating facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(inventoryTransactionService.getSkusForLedger(facilityId));
     }
 
     // 3. GET TRANSACTIONS (PAGINATED, WITH OPTIONAL FACILITY, SKU, TYPE, AND KEYWORD FILTERS)
