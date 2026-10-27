@@ -37,7 +37,7 @@ public class SkuController {
     }
 
     // 2. GET SKUS PAGINATED (Server-side paginated search & status filtering)
-    @GetMapping("/paginated")
+    @GetMapping
     @Operation(summary = "Get SKUs Paginated", description = "Retrieves paginated SKUs by facility with optional keyword search, stock level filter, and sorting.")
     public ResponseEntity<PageResponseDto<SkuResponseDto>> getSkusPaginated(
             @Parameter(description = "ID of the facility", required = true)

@@ -46,7 +46,7 @@ public class BatchController {
     }
 
     // 3. GET BATCHES PAGINATED (Search strictly by batchNum)
-    @GetMapping("/paginated")
+    @GetMapping
     @Operation(summary = "Get Batches Paginated", description = "Retrieves paginated batches by facility with optional batchNumber search and status/sku filter.")
     public ResponseEntity<PageResponseDto<BatchResponseDto>> getBatchesPaginated(
             @Parameter(description = "Facility ID", required = true)
