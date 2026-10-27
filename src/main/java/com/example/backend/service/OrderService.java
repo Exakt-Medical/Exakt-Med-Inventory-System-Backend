@@ -1,9 +1,11 @@
 package com.example.backend.service;
 
+import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.order.OrderItemRequestDto;
 import com.example.backend.dto.order.OrderItemResponseDto;
 import com.example.backend.dto.order.OrderRequestDto;
 import com.example.backend.dto.order.OrderResponseDto;
+import com.example.backend.dto.order.OrderSummaryDto;
 import com.example.backend.entity.Facility;
 import com.example.backend.entity.Order;
 import com.example.backend.entity.OrderedItem;
@@ -17,13 +19,19 @@ import com.example.backend.repository.OrderedItemRepository;
 import com.example.backend.repository.RestockRequestRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.SupplierRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -169,29 +177,165 @@ public class OrderService {
         return response;
     }
 
-    // 2. GET ALL ORDERS (facilityId is strictly required, optional status or list of statuses filter)
+    // 2. GET ORDERS PAGINATED (Server-side paginated search, status, and priority filtering)
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement', 'Pharmacist')")
-    public List<OrderResponseDto> getAllOrders(Long facilityId, List<Order.Status> statuses) {
+    public PageResponseDto<OrderResponseDto> getOrdersPaginated(
+            Long facilityId,
+            String search,
+            String status,
+            String priority,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is required");
         }
 
-        List<Order> orders;
-        if (statuses != null && !statuses.isEmpty()) {
-            if (statuses.size() == 1) {
-                orders = orderRepository.findByFacilityIdAndStatusOrderByCreatedAtDesc(facilityId, statuses.get(0));
+        List<Order.Status> statuses = null;
+        if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL")) {
+            String trimmed = status.trim();
+            if (trimmed.equalsIgnoreCase("Pending") || trimmed.equalsIgnoreCase("Pending Approval")) {
+                statuses = List.of(Order.Status.Pending);
+            } else if (trimmed.equalsIgnoreCase("Approved")) {
+                statuses = List.of(Order.Status.Approved);
+            } else if (trimmed.equalsIgnoreCase("Partially_Received") || trimmed.equalsIgnoreCase("Partially Received")) {
+                statuses = List.of(Order.Status.Partially_Received);
+            } else if (trimmed.equalsIgnoreCase("Received")) {
+                statuses = List.of(Order.Status.Received);
+            } else if (trimmed.equalsIgnoreCase("Denied") || trimmed.equalsIgnoreCase("Rejected")) {
+                statuses = List.of(Order.Status.Denied);
             } else {
-                orders = orderRepository.findByFacilityIdAndStatusInOrderByCreatedAtDesc(facilityId, statuses);
+                try {
+                    statuses = List.of(Order.Status.valueOf(trimmed));
+                } catch (IllegalArgumentException ignored) {
+                }
             }
-        } else {
-            orders = orderRepository.findByFacilityIdOrderByCreatedAtDesc(facilityId);
         }
+
+        // Map sortBy aliases to valid entity property names
+        String sortProperty = "createdAt";
+        if (sortBy != null && !sortBy.isBlank()) {
+            String lowerSort = sortBy.trim().toLowerCase();
+            if (lowerSort.equals("ordernumber") || lowerSort.equals("ponumberformatted") || lowerSort.equals("purchaseordernum")) {
+                sortProperty = "purchaseOrderNum";
+            } else if (lowerSort.equals("totalprice") || lowerSort.equals("estimatedcost")) {
+                sortProperty = "totalPrice";
+            } else if (lowerSort.equals("totalorderedunits") || lowerSort.equals("quantity")) {
+                sortProperty = "totalOrderedUnits";
+            } else if (lowerSort.equals("status")) {
+                sortProperty = "status";
+            } else if (lowerSort.equals("priority")) {
+                sortProperty = "priority";
+            } else if (lowerSort.equals("createdat") || lowerSort.equals("requesteddate")) {
+                sortProperty = "createdAt";
+            }
+        }
+
+        Sort.Direction direction = "ASC".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(Math.max(0, page), Math.max(1, size), Sort.by(direction, sortProperty));
+
+        String searchKeyword = (search != null && !search.isBlank()) ? search.trim() : null;
+        String priorityFilter = (priority != null && !priority.isBlank() && !priority.equalsIgnoreCase("ALL"))
+                ? priority.trim()
+                : null;
+
+        Page<Order> orderPage = orderRepository.findOrdersPaginated(
+                facilityId, statuses, priorityFilter, searchKeyword, pageable);
+
+        if (orderPage.isEmpty()) {
+            return PageResponseDto.from(orderPage.map(o -> mapToOrderResponseDto(o, Collections.emptyList())));
+        }
+
+        List<Long> orderIds = orderPage.getContent().stream().map(Order::getId).collect(Collectors.toList());
+        List<OrderedItem> allItems = orderedItemRepository.findByOrderIdInWithSku(orderIds);
+        Map<Long, List<OrderedItem>> itemsByOrderId = allItems.stream()
+                .collect(Collectors.groupingBy(item -> item.getOrder().getId()));
+
+        Page<OrderResponseDto> dtoPage = orderPage.map(order -> {
+            List<OrderedItem> orderItems = itemsByOrderId.getOrDefault(order.getId(), Collections.emptyList());
+            List<OrderItemResponseDto> itemDtos = orderItems.stream()
+                    .map(this::mapToItemResponseDto)
+                    .collect(Collectors.toList());
+            return mapToOrderResponseDto(order, itemDtos);
+        });
+
+        return PageResponseDto.from(dtoPage);
+    }
+
+    // 2b. GET ORDER SUMMARY KPIS
+    @Transactional(readOnly = true)
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement', 'Pharmacist')")
+    public OrderSummaryDto getOrderSummary(Long facilityId) {
+        if (facilityId == null) {
+            throw new RuntimeException("Facility ID is required");
+        }
+        List<Object[]> results = orderRepository.countOrdersByStatus(facilityId);
+        long pending = 0;
+        long approved = 0;
+        long partiallyReceived = 0;
+        long received = 0;
+        long denied = 0;
+
+        for (Object[] row : results) {
+            String status = String.valueOf(row[0]).toLowerCase();
+            long count = ((Number) row[1]).longValue();
+            switch (status) {
+                case "pending":
+                    pending += count;
+                    break;
+                case "approved":
+                    approved += count;
+                    break;
+                case "partially_received":
+                    partiallyReceived += count;
+                    break;
+                case "received":
+                    received += count;
+                    break;
+                case "denied":
+                case "rejected":
+                    denied += count;
+                    break;
+            }
+        }
+
+        long total = pending + approved + partiallyReceived + received + denied;
+
+        return OrderSummaryDto.builder()
+                .totalOrders(total)
+                .pendingCount(pending)
+                .approvedCount(approved)
+                .partiallyReceivedCount(partiallyReceived)
+                .receivedCount(received)
+                .deniedCount(denied)
+                .build();
+    }
+
+    // 2c. GET RECEIVABLE ORDERS (Lightweight list of Approved and Partially_Received orders for batch intake dropdown)
+    @Transactional(readOnly = true)
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement', 'Pharmacist')")
+    public List<OrderResponseDto> getReceivableOrders(Long facilityId) {
+        if (facilityId == null) {
+            throw new RuntimeException("Facility ID is required");
+        }
+        List<Order.Status> statuses = List.of(Order.Status.Approved, Order.Status.Partially_Received);
+        List<Order> orders = orderRepository.findByFacilityIdAndStatusInOrderByCreatedAtDesc(facilityId, statuses);
+
+        if (orders.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        List<OrderedItem> allItems = orderedItemRepository.findByOrderIdInWithSku(orderIds);
+        Map<Long, List<OrderedItem>> itemsByOrderId = allItems.stream()
+                .collect(Collectors.groupingBy(item -> item.getOrder().getId()));
 
         return orders.stream()
                 .map(order -> {
-                    List<OrderedItem> items = orderedItemRepository.findByOrderId(order.getId());
-                    List<OrderItemResponseDto> itemDtos = items.stream()
+                    List<OrderedItem> orderItems = itemsByOrderId.getOrDefault(order.getId(), Collections.emptyList());
+                    List<OrderItemResponseDto> itemDtos = orderItems.stream()
                             .map(this::mapToItemResponseDto)
                             .collect(Collectors.toList());
                     return mapToOrderResponseDto(order, itemDtos);

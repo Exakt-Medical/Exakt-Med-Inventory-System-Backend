@@ -1,7 +1,9 @@
 package com.example.backend.controller;
 
+import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.order.OrderRequestDto;
 import com.example.backend.dto.order.OrderResponseDto;
+import com.example.backend.dto.order.OrderSummaryDto;
 import com.example.backend.entity.Order;
 import com.example.backend.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,15 +35,46 @@ public class OrderController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
-    // 2. GET ALL ORDERS
+    // 2. GET ORDERS PAGINATED (Server-side paginated search, status, and priority filtering)
     @GetMapping
-    @Operation(summary = "Get All Orders by Facility", description = "Retrieves purchase orders for a facility with optional status filtering (Pending, Approved, Denied, Partially_Received, Received).")
-    public ResponseEntity<List<OrderResponseDto>> getAllOrders(
+    @Operation(summary = "Get Orders Paginated", description = "Retrieves paginated purchase orders with search, status, and priority filters.")
+    public ResponseEntity<PageResponseDto<OrderResponseDto>> getOrdersPaginated(
             @Parameter(description = "Facility ID", required = true)
             @RequestParam Long facilityId,
-            @Parameter(description = "Optional order status filter (single or multiple, e.g. Approved, Partially_Received)")
-            @RequestParam(required = false) List<Order.Status> status) {
-        return ResponseEntity.ok(orderService.getAllOrders(facilityId, status));
+            @Parameter(description = "Optional search query")
+            @RequestParam(required = false) String search,
+            @Parameter(description = "Optional status filter (e.g. ALL, Pending, Approved, Partially_Received, Received, Denied)")
+            @RequestParam(required = false) String status,
+            @Parameter(description = "Optional priority filter (e.g. ALL, Normal, Urgent)")
+            @RequestParam(required = false) String priority,
+            @Parameter(description = "Page index (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size")
+            @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "Sort property (createdAt, purchaseOrderNum, totalPrice, etc.)")
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @Parameter(description = "Sort direction (ASC, DESC)")
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        return ResponseEntity.ok(orderService.getOrdersPaginated(
+                facilityId, search, status, priority, page, size, sortBy, sortDir));
+    }
+
+    // 2b. GET ORDER SUMMARY KPIS
+    @GetMapping("/summary")
+    @Operation(summary = "Get Order Summary KPIs", description = "Returns aggregated status breakdown counts for the facility.")
+    public ResponseEntity<OrderSummaryDto> getOrderSummary(
+            @Parameter(description = "Facility ID", required = true)
+            @RequestParam Long facilityId) {
+        return ResponseEntity.ok(orderService.getOrderSummary(facilityId));
+    }
+
+    // 2c. GET RECEIVABLE ORDERS
+    @GetMapping("/receivable")
+    @Operation(summary = "Get Receivable Orders", description = "Returns active Approved and Partially_Received purchase orders for batch intake.")
+    public ResponseEntity<List<OrderResponseDto>> getReceivableOrders(
+            @Parameter(description = "Facility ID", required = true)
+            @RequestParam Long facilityId) {
+        return ResponseEntity.ok(orderService.getReceivableOrders(facilityId));
     }
 
     // 3. GET ORDER BY ID
