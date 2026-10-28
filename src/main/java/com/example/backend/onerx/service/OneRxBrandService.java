@@ -4,6 +4,7 @@ import com.example.backend.entity.Facility;
 import com.example.backend.entity.LibMedicine;
 import com.example.backend.entity.Sku;
 import com.example.backend.onerx.dto.OneRxBrandResponseDto;
+import com.example.backend.repository.BatchRepository;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.LibMedicineRepository;
 import com.example.backend.repository.SkuRepository;
@@ -11,7 +12,10 @@ import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -19,15 +23,18 @@ import java.util.stream.Collectors;
 public class OneRxBrandService {
 
     private final SkuRepository skuRepository;
+    private final BatchRepository batchRepository;
     private final LibMedicineRepository libMedicineRepository;
     private final FacilityRepository facilityRepository;
     private final FacilityAccessGuard facilityAccessGuard;
 
     public OneRxBrandService(SkuRepository skuRepository,
+                             BatchRepository batchRepository,
                              LibMedicineRepository libMedicineRepository,
                              FacilityRepository facilityRepository,
                              FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
+        this.batchRepository = batchRepository;
         this.libMedicineRepository = libMedicineRepository;
         this.facilityRepository = facilityRepository;
         this.facilityAccessGuard = facilityAccessGuard;
@@ -114,6 +121,20 @@ public class OneRxBrandService {
                 facility.getId()
         );
 
+        // Compute un-deducted expired batch units per SKU so expired stock is excluded from available quantity
+        Map<Long, Long> undeductedExpiredUnitsBySkuId = new HashMap<>();
+        List<Object[]> expiredMetrics = batchRepository.findExpiredBatchMetricsByFacilityId(
+                facility.getId(),
+                LocalDate.now()
+        );
+        for (Object[] row : expiredMetrics) {
+            if (row != null && row.length >= 3 && row[0] != null && row[2] != null) {
+                Long skuId = ((Number) row[0]).longValue();
+                Long expiredUnits = ((Number) row[2]).longValue();
+                undeductedExpiredUnitsBySkuId.put(skuId, expiredUnits);
+            }
+        }
+
         // Group SKUs by drugCode
         java.util.Map<String, List<Sku>> skusByDrugCode = availableSkus.stream()
                 .filter(sku -> sku.getLibMedicine() != null && sku.getLibMedicine().getDrugCode() != null)
@@ -123,21 +144,27 @@ public class OneRxBrandService {
                 ? facility.getFacilityCode()
                 : String.valueOf(facility.getId());
 
-        // 5. Build response list matching the requested order
+        // 5. Build response list matching the requested order (excluding un-deducted expired batch units)
         List<OneRxBrandResponseDto> responseList = new java.util.ArrayList<>();
         for (String code : distinctCodes) {
             LibMedicine medicine = medicineMap.get(code);
             List<Sku> skusForDrug = skusByDrugCode.getOrDefault(code, java.util.Collections.emptyList());
 
             List<OneRxBrandResponseDto.SkuBrandItemDto> skuItems = skusForDrug.stream()
-                    .map(sku -> OneRxBrandResponseDto.SkuBrandItemDto.builder()
-                            .name(sku.getName())
-                            .brandName(sku.getBrandName())
-                            .quantity(sku.getUnits() != null ? sku.getUnits() : 0L)
-                            .packagingUnit(sku.getPackagingUnit())
-                            .dosageForm(sku.getDosageForm())
-                            .dosageStrength(sku.getDosageStrength())
-                            .build())
+                    .map(sku -> {
+                        long rawUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
+                        long expiredUnits = undeductedExpiredUnitsBySkuId.getOrDefault(sku.getId(), 0L);
+                        long effectiveQuantity = Math.max(0L, rawUnits - expiredUnits);
+                        return OneRxBrandResponseDto.SkuBrandItemDto.builder()
+                                .name(sku.getName())
+                                .brandName(sku.getBrandName())
+                                .quantity(effectiveQuantity)
+                                .packagingUnit(sku.getPackagingUnit())
+                                .dosageForm(sku.getDosageForm())
+                                .dosageStrength(sku.getDosageStrength())
+                                .build();
+                    })
+                    .filter(item -> item.getQuantity() != null && item.getQuantity() > 0)
                     .collect(Collectors.toList());
 
             responseList.add(OneRxBrandResponseDto.builder()

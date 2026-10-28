@@ -7,6 +7,7 @@ import com.example.backend.entity.Sku;
 import com.example.backend.entity.User;
 import com.example.backend.onerx.dto.OneRxDispenseRequestDto;
 import com.example.backend.onerx.dto.OneRxDispenseResponseDto;
+import com.example.backend.repository.BatchRepository;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.SkuRepository;
@@ -38,6 +39,7 @@ import java.util.TreeSet;
 public class OneRxDispenseService {
 
     private final SkuRepository skuRepository;
+    private final BatchRepository batchRepository;
     private final FacilityRepository facilityRepository;
     private final BatchService batchService;
     private final InventoryTransactionService inventoryTransactionService;
@@ -47,6 +49,7 @@ public class OneRxDispenseService {
     private final FacilityAccessGuard facilityAccessGuard;
 
     public OneRxDispenseService(SkuRepository skuRepository,
+                                BatchRepository batchRepository,
                                 FacilityRepository facilityRepository,
                                 BatchService batchService,
                                 InventoryTransactionService inventoryTransactionService,
@@ -55,6 +58,7 @@ public class OneRxDispenseService {
                                 UserRepository userRepository,
                                 FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
+        this.batchRepository = batchRepository;
         this.facilityRepository = facilityRepository;
         this.batchService = batchService;
         this.inventoryTransactionService = inventoryTransactionService;
@@ -139,12 +143,24 @@ public class OneRxDispenseService {
         }
 
         // Acquire PESSIMISTIC_WRITE locks on all target SKUs in alphabetical order
+        // and compute effective unexpired available units (excluding un-deducted expired batches)
+        LocalDate today = LocalDate.now();
         Map<String, Sku> lockedSkusByName = new HashMap<>();
+        Map<Long, Long> effectiveAvailableBySkuId = new HashMap<>();
         for (String name : sortedSkuNames) {
             Sku lockedSku = skuRepository.findByFacilityIdAndNameForUpdate(facility.getId(), name)
                     .orElseThrow(() -> new IllegalArgumentException(
                             String.format("SKU '%s' not found for facility '%s'.", name, facility.getName())));
             lockedSkusByName.put(name.toUpperCase(), lockedSku);
+
+            long rawUnits = lockedSku.getUnits() != null ? lockedSku.getUnits() : 0L;
+            long undeductedExpiredUnits = batchRepository.sumUndeductedExpiredUnitsForSku(
+                    facility.getId(),
+                    lockedSku.getId(),
+                    today
+            );
+            long effectiveAvailable = Math.max(0L, rawUnits - undeductedExpiredUnits);
+            effectiveAvailableBySkuId.put(lockedSku.getId(), effectiveAvailable);
         }
 
         List<ValidatedItem> itemsToDispense = new ArrayList<>();
@@ -159,12 +175,12 @@ public class OneRxDispenseService {
                 Long requestedUnits = brand.getDispensedUnits();
 
                 Sku sku = lockedSkusByName.get(skuName.toUpperCase());
-                long availableUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
+                long availableUnits = effectiveAvailableBySkuId.getOrDefault(sku.getId(), 0L);
                 long cumulativeRequested = cumulativeRequestedBySkuId.getOrDefault(sku.getId(), 0L) + requestedUnits;
 
                 if (availableUnits < cumulativeRequested) {
                     throw new IllegalArgumentException(String.format(
-                            "Insufficient stock for SKU '%s' (%s). Requested: %d, Available: %d",
+                            "Insufficient stock for SKU '%s' (%s). Requested: %d, Available (unexpired): %d",
                             sku.getName(),
                             sku.getBrandName() != null ? sku.getBrandName() : "N/A",
                             cumulativeRequested,

@@ -50,6 +50,17 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
             @Param("skuId") Long skuId,
             @Param("date") java.time.LocalDate date);
 
+    @Query("SELECT COALESCE(SUM(b.units), 0) FROM Batch b WHERE " +
+           "b.facility.id = :facilityId AND " +
+           "b.orderedItem.sku.id = :skuId AND " +
+           "(b.status = com.example.backend.entity.Batch.Status.Expired OR (b.status = com.example.backend.entity.Batch.Status.Available AND b.expiryDate <= :today)) AND " +
+           "(b.skuDeducted IS NULL OR b.skuDeducted = false) AND " +
+           "b.units > 0")
+    long sumUndeductedExpiredUnitsForSku(
+            @Param("facilityId") Long facilityId,
+            @Param("skuId") Long skuId,
+            @Param("today") java.time.LocalDate today);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE b.orderedItem.sku.id = :skuId " +
            "AND b.facility.id = :facilityId " +
