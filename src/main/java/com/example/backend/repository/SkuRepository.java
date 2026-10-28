@@ -1,9 +1,11 @@
 package com.example.backend.repository;
 
 import com.example.backend.entity.Sku;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -19,6 +21,14 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
     List<Sku> findByLibMedicineId(Long medicineId);
 
     Optional<Sku> findByFacilityIdAndName(Long facilityId, String name);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Sku s WHERE s.id = :id")
+    Optional<Sku> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM Sku s WHERE s.facility.id = :facilityId AND s.name = :name")
+    Optional<Sku> findByFacilityIdAndNameForUpdate(@Param("facilityId") Long facilityId, @Param("name") String name);
 
     boolean existsByFacilityIdAndName(Long facilityId, String name);
 

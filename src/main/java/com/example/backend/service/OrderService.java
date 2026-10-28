@@ -11,7 +11,6 @@ import com.example.backend.entity.Order;
 import com.example.backend.entity.OrderedItem;
 import com.example.backend.entity.Sku;
 import com.example.backend.entity.Supplier;
-import com.example.backend.entity.RestockRequest;
 import com.example.backend.entity.AuditLog;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.OrderRepository;
@@ -19,6 +18,7 @@ import com.example.backend.repository.OrderedItemRepository;
 import com.example.backend.repository.RestockRequestRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.SupplierRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -44,6 +44,7 @@ public class OrderService {
     private final FacilityRepository facilityRepository;
     private final RestockRequestRepository restockRequestRepository;
     private final AuditLogService auditLogService;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public OrderService(OrderRepository orderRepository,
                         OrderedItemRepository orderedItemRepository,
@@ -51,7 +52,8 @@ public class OrderService {
                         SkuRepository skuRepository,
                         FacilityRepository facilityRepository,
                         RestockRequestRepository restockRequestRepository,
-                        AuditLogService auditLogService) {
+                        AuditLogService auditLogService,
+                        FacilityAccessGuard facilityAccessGuard) {
         this.orderRepository = orderRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.supplierRepository = supplierRepository;
@@ -59,6 +61,7 @@ public class OrderService {
         this.facilityRepository = facilityRepository;
         this.restockRequestRepository = restockRequestRepository;
         this.auditLogService = auditLogService;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. CREATE PURCHASE ORDER REQUEST
@@ -68,6 +71,8 @@ public class OrderService {
         if (request.getFacilityId() == null) {
             throw new RuntimeException("Facility ID is required");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
 
         Facility facility = facilityRepository.findById(request.getFacilityId())
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
@@ -193,6 +198,8 @@ public class OrderService {
             throw new RuntimeException("Facility ID is required");
         }
 
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         List<Order.Status> statuses = null;
         if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL")) {
             String trimmed = status.trim();
@@ -271,6 +278,8 @@ public class OrderService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is required");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         List<Object[]> results = orderRepository.countOrdersByStatus(facilityId);
         long pending = 0;
         long approved = 0;
@@ -320,6 +329,8 @@ public class OrderService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is required");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         List<Order.Status> statuses = List.of(Order.Status.Approved, Order.Status.Partially_Received);
         List<Order> orders = orderRepository.findByFacilityIdAndStatusInOrderByCreatedAtDesc(facilityId, statuses);
 
@@ -350,6 +361,10 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found with id: " + id));
 
+        if (order.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(order.getFacility().getId());
+        }
+
         List<OrderedItem> items = orderedItemRepository.findByOrderId(order.getId());
         List<OrderItemResponseDto> itemDtos = items.stream()
                 .map(this::mapToItemResponseDto)
@@ -364,6 +379,10 @@ public class OrderService {
     public OrderResponseDto updateOrderStatus(Long id, Order.Status status, String notes) {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found with id: " + id));
+
+        if (order.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(order.getFacility().getId());
+        }
 
         Order.Status newStatus = status != null ? status : Order.Status.Pending;
         order.setStatus(newStatus);

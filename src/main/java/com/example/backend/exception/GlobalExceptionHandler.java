@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -45,7 +46,18 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
     }
 
-    // 3. Bad Credentials (Wrong username or password on login) -> HTTP 401 Unauthorized
+    // 3. Disabled Account on login -> HTTP 403 Forbidden
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<ErrorResponseDto> handleDisabledException(DisabledException ex) {
+        ErrorResponseDto response = new ErrorResponseDto(
+                HttpStatus.FORBIDDEN.value(),
+                "Account Disabled",
+                "Your user account has been deactivated. Please contact an administrator."
+        );
+        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
+    }
+
+    // 4. Bad Credentials (Wrong username or password on login) -> HTTP 401 Unauthorized
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ErrorResponseDto> handleBadCredentialsException(BadCredentialsException ex) {
         ErrorResponseDto response = new ErrorResponseDto(
@@ -56,7 +68,7 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
     }
 
-    // 4. Resource Not Found / Bad Request (e.g., RuntimeException("User not found..."))
+    // 5. Resource Not Found / Bad Request (e.g., RuntimeException("User not found..."))
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponseDto> handleRuntimeException(RuntimeException ex) {
         ErrorResponseDto response = new ErrorResponseDto(
@@ -67,7 +79,7 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
     }
 
-    // 5. Catch-all for any unhandled server errors -> HTTP 500 Internal Server Error
+    // 6. Catch-all for any unhandled server errors -> HTTP 500 Internal Server Error
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponseDto> handleGeneralException(Exception ex) {
         ErrorResponseDto response = new ErrorResponseDto(

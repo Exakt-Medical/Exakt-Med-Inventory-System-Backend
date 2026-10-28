@@ -9,6 +9,7 @@ import com.example.backend.entity.UserFacilityLink;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.UserFacilityLinkRepository;
 import com.example.backend.repository.UserRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -30,15 +31,18 @@ public class FacilityAssignService {
     private final FacilityRepository facilityRepository;
     private final UserFacilityLinkRepository userFacilityLinkRepository;
     private final AuditLogService auditLogService;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public FacilityAssignService(UserRepository userRepository,
                                  FacilityRepository facilityRepository,
                                  UserFacilityLinkRepository userFacilityLinkRepository,
-                                 AuditLogService auditLogService) {
+                                 AuditLogService auditLogService,
+                                 FacilityAccessGuard facilityAccessGuard) {
         this.userRepository = userRepository;
         this.facilityRepository = facilityRepository;
         this.userFacilityLinkRepository = userFacilityLinkRepository;
         this.auditLogService = auditLogService;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. ASSIGN 1 OR MORE USERS (ADMIN / PHARMACIST / PROCUREMENT) TO A FACILITY
@@ -47,6 +51,7 @@ public class FacilityAssignService {
     public String assignUsersToFacility(Long facilityId, FacilityAssignRequestDto request) {
         Facility facility = facilityRepository.findById(facilityId)
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + facilityId));
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
 
         User currentUser = getCurrentUser();
         List<String> assignedUsernames = new ArrayList<>();
@@ -105,6 +110,7 @@ public class FacilityAssignService {
     public String unassignUsersFromFacility(Long facilityId, FacilityAssignRequestDto request) {
         Facility facility = facilityRepository.findById(facilityId)
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + facilityId));
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
 
         User currentUser = getCurrentUser();
         List<Long> unassignedUserIds = new ArrayList<>();
@@ -162,6 +168,7 @@ public class FacilityAssignService {
     // 6. GET ALL USERS ASSIGNED TO A SPECIFIC FACILITY
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin')")
     public List<UserResponseDto> getUsersByFacilityId(Long facilityId) {
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         return userFacilityLinkRepository.findByFacilityId(facilityId)
                 .stream()
                 .map(link -> {

@@ -4,6 +4,7 @@ import com.example.backend.dto.restockRequest.RestockRequestDto;
 import com.example.backend.dto.restockRequest.RestockResponseDto;
 import com.example.backend.entity.*;
 import com.example.backend.repository.*;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -22,17 +24,20 @@ public class RestockRequestService {
     private final FacilityRepository facilityRepository;
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public RestockRequestService(RestockRequestRepository restockRequestRepository,
                                  SkuRepository skuRepository,
                                  FacilityRepository facilityRepository,
                                  UserRepository userRepository,
-                                 AuditLogService auditLogService) {
+                                 AuditLogService auditLogService,
+                                 FacilityAccessGuard facilityAccessGuard) {
         this.restockRequestRepository = restockRequestRepository;
         this.skuRepository = skuRepository;
         this.facilityRepository = facilityRepository;
         this.userRepository = userRepository;
         this.auditLogService = auditLogService;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. CREATE RESTOCK REQUEST (Pharmacist / Admin / SuperAdmin)
@@ -43,12 +48,14 @@ public class RestockRequestService {
             throw new RuntimeException("Request body cannot be null");
         }
 
-        Sku sku = skuRepository.findById(request.getSkuId())
-                .orElseThrow(() -> new RuntimeException("SKU not found with id: " + request.getSkuId()));
-
         if (request.getFacilityId() == null) {
             throw new RuntimeException("Facility ID is required");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
+
+        Sku sku = skuRepository.findById(request.getSkuId())
+                .orElseThrow(() -> new RuntimeException("SKU not found with id: " + request.getSkuId()));
 
         Facility facility = facilityRepository.findById(request.getFacilityId())
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
@@ -109,16 +116,23 @@ public class RestockRequestService {
         boolean isPending = Boolean.TRUE.equals(pendingOnly);
 
         if (facilityId != null) {
+            facilityAccessGuard.verifyFacilityAccess(facilityId);
             if (isPending) {
                 list = restockRequestRepository.findByFacilityIdAndOrderIsNullOrderByCreatedAtDesc(facilityId);
             } else {
                 list = restockRequestRepository.findByFacilityIdOrderByCreatedAtDesc(facilityId);
             }
         } else {
-            if (isPending) {
-                list = restockRequestRepository.findByOrderIsNullOrderByCreatedAtDesc();
+            Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+            List<RestockRequest> all = isPending
+                    ? restockRequestRepository.findByOrderIsNullOrderByCreatedAtDesc()
+                    : restockRequestRepository.findAllByOrderByCreatedAtDesc();
+            if (accessibleIds != null) {
+                list = all.stream()
+                        .filter(r -> r.getFacility() != null && accessibleIds.contains(r.getFacility().getId()))
+                        .collect(Collectors.toList());
             } else {
-                list = restockRequestRepository.findAllByOrderByCreatedAtDesc();
+                list = all;
             }
         }
 
@@ -133,6 +147,9 @@ public class RestockRequestService {
     public RestockResponseDto getRestockRequestById(Long id) {
         RestockRequest request = restockRequestRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Restock request not found with id: " + id));
+        if (request.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(request.getFacility().getId());
+        }
         return mapToResponseDto(request);
     }
 

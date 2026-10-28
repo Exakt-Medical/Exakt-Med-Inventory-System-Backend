@@ -14,6 +14,11 @@ import java.util.List;
 @Repository
 public interface InventoryTransactionRepository extends JpaRepository<InventoryTransaction, Long> {
 
+    boolean existsByFacilityIdAndTransactionTypeAndReferenceNumberIgnoreCase(
+            Long facilityId,
+            InventoryTransaction.Type transactionType,
+            String referenceNumber);
+
     List<InventoryTransaction> findByFacilityIdAndSkuIdOrderByCreatedAtDesc(Long facilityId, Long skuId);
 
     List<InventoryTransaction> findByFacilityIdAndSkuIdOrderByCreatedAtAsc(Long facilityId, Long skuId);

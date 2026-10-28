@@ -4,12 +4,14 @@ import com.example.backend.dto.dispensed.DispensedLogResponseDto;
 import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.DispensedLog;
 import com.example.backend.repository.DispensedLogRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -17,11 +19,14 @@ public class DispensedLogService {
 
     private final DispensedLogRepository dispensedLogRepository;
     private final AuditLogService auditLogService;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public DispensedLogService(DispensedLogRepository dispensedLogRepository,
-                               AuditLogService auditLogService) {
+                               AuditLogService auditLogService,
+                               FacilityAccessGuard facilityAccessGuard) {
         this.dispensedLogRepository = dispensedLogRepository;
         this.auditLogService = auditLogService;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. UPDATE STATUS TO RECEIVED (When button is pressed)
@@ -30,6 +35,10 @@ public class DispensedLogService {
     public DispensedLogResponseDto updateStatusToReceived(Long id) {
         DispensedLog log = dispensedLogRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Dispensed log not found with id: " + id));
+
+        if (log.getSku() != null && log.getSku().getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(log.getSku().getFacility().getId());
+        }
 
         log.setStatus(DispensedLog.Status.Received);
         log.setReceivedAt(LocalDateTime.now());
@@ -61,14 +70,26 @@ public class DispensedLogService {
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public List<DispensedLogResponseDto> getAllDispensedLogs(Long facilityId, DispensedLog.Status status) {
         List<DispensedLog> logs;
-        if (facilityId != null && status != null) {
-            logs = dispensedLogRepository.findBySkuFacilityIdAndStatusOrderByDispensedAtDesc(facilityId, status);
-        } else if (facilityId != null) {
-            logs = dispensedLogRepository.findBySkuFacilityIdOrderByDispensedAtDesc(facilityId);
-        } else if (status != null) {
-            logs = dispensedLogRepository.findByStatusOrderByDispensedAtDesc(status);
+        if (facilityId != null) {
+            facilityAccessGuard.verifyFacilityAccess(facilityId);
+            if (status != null) {
+                logs = dispensedLogRepository.findBySkuFacilityIdAndStatusOrderByDispensedAtDesc(facilityId, status);
+            } else {
+                logs = dispensedLogRepository.findBySkuFacilityIdOrderByDispensedAtDesc(facilityId);
+            }
         } else {
-            logs = dispensedLogRepository.findAllByOrderByDispensedAtDesc();
+            Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+            List<DispensedLog> all = (status != null)
+                    ? dispensedLogRepository.findByStatusOrderByDispensedAtDesc(status)
+                    : dispensedLogRepository.findAllByOrderByDispensedAtDesc();
+            if (accessibleIds != null) {
+                logs = all.stream()
+                        .filter(l -> l.getSku() != null && l.getSku().getFacility() != null
+                                && accessibleIds.contains(l.getSku().getFacility().getId()))
+                        .collect(Collectors.toList());
+            } else {
+                logs = all;
+            }
         }
         return logs.stream().map(this::mapToResponseDto).collect(Collectors.toList());
     }
@@ -79,6 +100,9 @@ public class DispensedLogService {
     public DispensedLogResponseDto getDispensedLogById(Long id) {
         DispensedLog log = dispensedLogRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Dispensed log not found with id: " + id));
+        if (log.getSku() != null && log.getSku().getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(log.getSku().getFacility().getId());
+        }
         return mapToResponseDto(log);
     }
 

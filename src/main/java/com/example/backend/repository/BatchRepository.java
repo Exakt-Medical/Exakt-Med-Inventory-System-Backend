@@ -1,9 +1,11 @@
 package com.example.backend.repository;
 
 import com.example.backend.entity.Batch;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -20,6 +22,10 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
 
     Optional<Batch> findByBatchNumAndFacilityId(String batchNum, Long facilityId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Batch b WHERE b.id = :id")
+    Optional<Batch> findByIdForUpdate(@Param("id") Long id);
+
     boolean existsByBatchNumAndFacilityId(String batchNum, Long facilityId);
 
     List<Batch> findByOrderedItemId(Long orderedItemId);
@@ -32,6 +38,7 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
 
     List<Batch> findByFacilityIdAndStatusAndExpiryDateLessThanEqual(Long facilityId, Batch.Status status, java.time.LocalDate date);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE " +
            "b.facility.id = :facilityId AND " +
            "b.orderedItem.sku.id = :skuId AND " +
@@ -43,6 +50,7 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
             @Param("skuId") Long skuId,
             @Param("date") java.time.LocalDate date);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE b.orderedItem.sku.id = :skuId " +
            "AND b.facility.id = :facilityId " +
            "AND b.status = :status " +
@@ -62,28 +70,6 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
             @Param("facilityId") Long facilityId,
             @Param("skuId") Long skuId);
 
-    /**
-     * PAGINATED BATCH SEARCH & MULTI-FILTER QUERY
-     *
-     * Why this query has both 'value' and 'countQuery':
-     * - Spring Data JPA requires both when using Pageable with JOINs:
-     *   1. 'value': Queries the exact slice of batch records for the current page (e.g. LIMIT 6 OFFSET 0).
-     *   2. 'countQuery': Counts the total number of matching records so the frontend can calculate total pages.
-     *
-     * Filters handled in the WHERE clause:
-     * - facilityId: Scopes results strictly to the active facility.
-     * - search: Case-insensitive search matching batchNum, SKU name, or SKU brand name (ignored if null/blank).
-     * - sku: Exact match against SKU name (ignored if null/blank/'ALL').
-     * - status: Maps UI filter values to database states:
-     *     * 'ACTIVE': Status is Available AND units > 0 (in-stock stock).
-     *     * 'QUARANTINED': Status is Quarantined.
-     *     * 'EXPIRED': Status is Expired.
-     *     * 'DEPLETED': Units is 0.
-     * - expiryFilter: Evaluates expiration dates dynamically against current date:
-     *     * 'EXPIRED': expiryDate <= today.
-     *     * 'NEAR_EXPIRY': today < expiryDate <= (today + 90 days).
-     *     * 'HEALTHY': expiryDate > (today + 90 days).
-     */
     @Query(value = "SELECT b FROM Batch b " +
            "LEFT JOIN b.orderedItem oi " +
            "LEFT JOIN oi.sku s " +
@@ -164,6 +150,3 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
             @Param("facilityId") Long facilityId,
             @Param("today") java.time.LocalDate today);
 }
-
-
-

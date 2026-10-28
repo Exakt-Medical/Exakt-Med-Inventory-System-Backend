@@ -5,6 +5,7 @@ import com.example.backend.dto.dashboard.PharmacistDashboardResponseDto;
 import com.example.backend.dto.dashboard.ProcurementDashboardResponseDto;
 import com.example.backend.entity.*;
 import com.example.backend.repository.*;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +26,7 @@ public class DashboardService {
     private final SupplierRepository supplierRepository;
     private final FacilityRepository facilityRepository;
     private final RestockRequestRepository restockRequestRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     private static final String[] PALETTE = {
             "#3B82F6", "#10B981", "#8B5CF6", "#F59E0B",
@@ -38,7 +40,8 @@ public class DashboardService {
                             OrderedItemRepository orderedItemRepository,
                             SupplierRepository supplierRepository,
                             FacilityRepository facilityRepository,
-                            RestockRequestRepository restockRequestRepository) {
+                            RestockRequestRepository restockRequestRepository,
+                            FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.batchRepository = batchRepository;
         this.orderRepository = orderRepository;
@@ -46,11 +49,13 @@ public class DashboardService {
         this.supplierRepository = supplierRepository;
         this.facilityRepository = facilityRepository;
         this.restockRequestRepository = restockRequestRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. GET PHARMACIST DASHBOARD
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public PharmacistDashboardResponseDto getPharmacistDashboard(Long facilityId) {
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         String facilityName = resolveFacilityName(facilityId);
         List<Sku> skus = fetchSkus(facilityId);
         List<Batch> batches = fetchBatches(facilityId);
@@ -164,6 +169,7 @@ public class DashboardService {
     // 2. GET PROCUREMENT DASHBOARD
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement')")
     public ProcurementDashboardResponseDto getProcurementDashboard(Long facilityId) {
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         String facilityName = resolveFacilityName(facilityId);
         List<Sku> skus = fetchSkus(facilityId);
         List<Batch> batches = fetchBatches(facilityId);
@@ -327,6 +333,7 @@ public class DashboardService {
     // 3. GET DASHBOARD SUMMARY (Combined)
     @PreAuthorize("isAuthenticated()")
     public DashboardResponseDto getDashboardSummary(Long facilityId) {
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         String facilityName = resolveFacilityName(facilityId);
         return DashboardResponseDto.builder()
                 .facilityId(facilityId)
@@ -351,28 +358,52 @@ public class DashboardService {
         if (facilityId != null) {
             return skuRepository.findByFacilityId(facilityId);
         }
-        return skuRepository.findAll();
+        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+        if (accessibleIds == null) {
+            return skuRepository.findAll();
+        }
+        return skuRepository.findAll().stream()
+                .filter(s -> s.getFacility() != null && accessibleIds.contains(s.getFacility().getId()))
+                .collect(Collectors.toList());
     }
 
     private List<Batch> fetchBatches(Long facilityId) {
         if (facilityId != null) {
             return batchRepository.findByFacilityIdOrderByReceivedAtDesc(facilityId);
         }
-        return batchRepository.findAll();
+        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+        if (accessibleIds == null) {
+            return batchRepository.findAll();
+        }
+        return batchRepository.findAll().stream()
+                .filter(b -> b.getFacility() != null && accessibleIds.contains(b.getFacility().getId()))
+                .collect(Collectors.toList());
     }
 
     private List<Order> fetchOrders(Long facilityId) {
         if (facilityId != null) {
             return orderRepository.findByFacilityIdOrderByCreatedAtDesc(facilityId);
         }
-        return orderRepository.findAllByOrderByCreatedAtDesc();
+        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+        if (accessibleIds == null) {
+            return orderRepository.findAllByOrderByCreatedAtDesc();
+        }
+        return orderRepository.findAllByOrderByCreatedAtDesc().stream()
+                .filter(o -> o.getFacility() != null && accessibleIds.contains(o.getFacility().getId()))
+                .collect(Collectors.toList());
     }
 
     private List<Supplier> fetchSuppliers(Long facilityId) {
         if (facilityId != null) {
             return supplierRepository.findByFacilityId(facilityId);
         }
-        return supplierRepository.findAll();
+        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+        if (accessibleIds == null) {
+            return supplierRepository.findAll();
+        }
+        return supplierRepository.findAll().stream()
+                .filter(s -> s.getFacility() != null && accessibleIds.contains(s.getFacility().getId()))
+                .collect(Collectors.toList());
     }
 
     private String getCategoryName(Sku sku) {

@@ -7,6 +7,7 @@ import com.example.backend.onerx.dto.OneRxBrandResponseDto;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.LibMedicineRepository;
 import com.example.backend.repository.SkuRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +21,16 @@ public class OneRxBrandService {
     private final SkuRepository skuRepository;
     private final LibMedicineRepository libMedicineRepository;
     private final FacilityRepository facilityRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public OneRxBrandService(SkuRepository skuRepository,
                              LibMedicineRepository libMedicineRepository,
-                             FacilityRepository facilityRepository) {
+                             FacilityRepository facilityRepository,
+                             FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.libMedicineRepository = libMedicineRepository;
         this.facilityRepository = facilityRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     /**
@@ -86,9 +90,11 @@ public class OneRxBrandService {
 
         String trimmedFacilityCode = facilityCode.trim();
 
-        // 2. Resolve Facility
+        // 2. Resolve Facility & enforce facility access
         Facility facility = resolveFacility(trimmedFacilityCode)
                 .orElseThrow(() -> new RuntimeException("Facility not found with code: " + trimmedFacilityCode));
+
+        facilityAccessGuard.verifyFacilityAccess(facility.getId());
 
         // 3. Resolve all LibMedicines
         List<LibMedicine> medicines = libMedicineRepository.findByDrugCodeIn(distinctCodes);

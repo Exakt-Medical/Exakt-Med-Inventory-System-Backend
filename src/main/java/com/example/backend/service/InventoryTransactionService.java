@@ -9,6 +9,7 @@ import com.example.backend.entity.*;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.SkuRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -19,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -29,13 +29,16 @@ public class InventoryTransactionService {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final SkuRepository skuRepository;
     private final FacilityRepository facilityRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public InventoryTransactionService(InventoryTransactionRepository inventoryTransactionRepository,
-                                     SkuRepository skuRepository,
-                                     FacilityRepository facilityRepository) {
+                                       SkuRepository skuRepository,
+                                       FacilityRepository facilityRepository,
+                                       FacilityAccessGuard facilityAccessGuard) {
         this.inventoryTransactionRepository = inventoryTransactionRepository;
         this.skuRepository = skuRepository;
         this.facilityRepository = facilityRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     /**
@@ -129,6 +132,8 @@ public class InventoryTransactionService {
         if (skuId == null) {
             throw new IllegalArgumentException("SKU ID is required.");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
 
         facilityRepository.findById(facilityId)
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + facilityId));
@@ -227,6 +232,8 @@ public class InventoryTransactionService {
             throw new IllegalArgumentException("Facility ID is strictly required to query inventory transactions.");
         }
 
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         Sort.Direction direction = "ASC".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
         String sortProperty = ("referenceNumber".equalsIgnoreCase(sortBy) || "transactionType".equalsIgnoreCase(sortBy))
                 ? sortBy : "createdAt";
@@ -253,6 +260,8 @@ public class InventoryTransactionService {
         if (facilityId == null) {
             throw new IllegalArgumentException("Facility ID is strictly required to query inventory transaction summary.");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
 
         List<InventoryTransaction.Type> filterTypes = (types != null && !types.isEmpty()) ? types : null;
         List<Object[]> rows = inventoryTransactionRepository.getTransactionSummaryByFacility(facilityId, filterTypes);

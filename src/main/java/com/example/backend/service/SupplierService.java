@@ -7,11 +7,13 @@ import com.example.backend.entity.Supplier;
 import com.example.backend.entity.AuditLog;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.SupplierRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -20,13 +22,16 @@ public class SupplierService {
     private final SupplierRepository supplierRepository;
     private final FacilityRepository facilityRepository;
     private final AuditLogService auditLogService;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public SupplierService(SupplierRepository supplierRepository,
                            FacilityRepository facilityRepository,
-                           AuditLogService auditLogService) {
+                           AuditLogService auditLogService,
+                           FacilityAccessGuard facilityAccessGuard) {
         this.supplierRepository = supplierRepository;
         this.facilityRepository = facilityRepository;
         this.auditLogService = auditLogService;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. CREATE SUPPLIER (SuperAdmin only)
@@ -35,6 +40,7 @@ public class SupplierService {
     public SupplierResponseDto createSupplier(SupplierRequestDto request) {
         Facility facility = facilityRepository.findById(request.getFacilityId())
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
+        facilityAccessGuard.verifyFacilityAccess(facility.getId());
 
         if (supplierRepository.existsByFacilityIdAndEmail(facility.getId(), request.getEmail().trim())) {
             throw new RuntimeException("Email address is already used by another supplier in this facility: " + request.getEmail());
@@ -75,9 +81,14 @@ public class SupplierService {
             if (!facilityRepository.existsById(facilityId)) {
                 throw new RuntimeException("Facility not found with id: " + facilityId);
             }
+            facilityAccessGuard.verifyFacilityAccess(facilityId);
             suppliers = supplierRepository.findByFacilityId(facilityId);
         } else {
-            suppliers = supplierRepository.findAll();
+            Set<Long> accessibleFacilityIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+            suppliers = supplierRepository.findAll().stream()
+                    .filter(s -> accessibleFacilityIds == null ||
+                            (s.getFacility() != null && accessibleFacilityIds.contains(s.getFacility().getId())))
+                    .collect(Collectors.toList());
         }
         return suppliers.stream()
                 .map(s -> mapToResponseDto(s, null))
@@ -89,6 +100,9 @@ public class SupplierService {
     public SupplierResponseDto getSupplierById(Long id) {
         Supplier supplier = supplierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + id));
+        if (supplier.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(supplier.getFacility().getId());
+        }
         return mapToResponseDto(supplier, null);
     }
 
@@ -98,9 +112,13 @@ public class SupplierService {
     public SupplierResponseDto updateSupplier(Long id, SupplierRequestDto request) {
         Supplier supplier = supplierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + id));
+        if (supplier.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(supplier.getFacility().getId());
+        }
 
         // If facility changed
         if (request.getFacilityId() != null && !supplier.getFacility().getId().equals(request.getFacilityId())) {
+            facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
             Facility newFacility = facilityRepository.findById(request.getFacilityId())
                     .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
             supplier.setFacility(newFacility);
@@ -144,6 +162,9 @@ public class SupplierService {
     public void deleteSupplier(Long id) {
         Supplier supplier = supplierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + id));
+        if (supplier.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(supplier.getFacility().getId());
+        }
 
         supplierRepository.delete(supplier);
 

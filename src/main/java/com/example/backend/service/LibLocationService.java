@@ -7,12 +7,14 @@ import com.example.backend.entity.LibLocation;
 import com.example.backend.repository.BatchRepository;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.LibLocationRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -23,13 +25,16 @@ public class LibLocationService {
     private final LibLocationRepository libLocationRepository;
     private final FacilityRepository facilityRepository;
     private final BatchRepository batchRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public LibLocationService(LibLocationRepository libLocationRepository,
                               FacilityRepository facilityRepository,
-                              @Lazy BatchRepository batchRepository) {
+                              @Lazy BatchRepository batchRepository,
+                              FacilityAccessGuard facilityAccessGuard) {
         this.libLocationRepository = libLocationRepository;
         this.facilityRepository = facilityRepository;
         this.batchRepository = batchRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. CREATE LOCATION (Option 1: Custom code with auto-generation fallback)
@@ -42,6 +47,7 @@ public class LibLocationService {
 
         Facility facility = null;
         if (request.getFacilityId() != null) {
+            facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
             facility = facilityRepository.findById(request.getFacilityId())
                     .orElseThrow(() -> new RuntimeException("Facility not found with ID: " + request.getFacilityId()));
         }
@@ -82,13 +88,19 @@ public class LibLocationService {
         List<LibLocation> locations;
 
         if (facilityId != null) {
+            facilityAccessGuard.verifyFacilityAccess(facilityId);
             locations = (activeOnly != null && activeOnly)
                     ? libLocationRepository.findByFacilityIdAndIsActiveTrue(facilityId)
                     : libLocationRepository.findByFacilityId(facilityId);
         } else {
-            locations = (activeOnly != null && activeOnly)
+            Set<Long> accessibleFacilityIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
+            List<LibLocation> rawLocations = (activeOnly != null && activeOnly)
                     ? libLocationRepository.findByIsActiveTrue()
                     : libLocationRepository.findAll();
+            locations = rawLocations.stream()
+                    .filter(loc -> accessibleFacilityIds == null ||
+                            (loc.getFacility() != null && accessibleFacilityIds.contains(loc.getFacility().getId())))
+                    .collect(Collectors.toList());
         }
 
         return locations.stream()
@@ -103,6 +115,9 @@ public class LibLocationService {
     public LibLocationResponseDto getLocationById(Long id) {
         LibLocation location = libLocationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Location not found with ID: " + id));
+        if (location.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(location.getFacility().getId());
+        }
         return mapToDto(location);
     }
 
@@ -112,9 +127,13 @@ public class LibLocationService {
     public LibLocationResponseDto updateLocation(Long id, LibLocationRequestDto request) {
         LibLocation location = libLocationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Location not found with ID: " + id));
+        if (location.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(location.getFacility().getId());
+        }
 
         Facility facility = location.getFacility();
         if (request.getFacilityId() != null) {
+            facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
             facility = facilityRepository.findById(request.getFacilityId())
                     .orElseThrow(() -> new RuntimeException("Facility not found with ID: " + request.getFacilityId()));
             location.setFacility(facility);
@@ -155,6 +174,9 @@ public class LibLocationService {
     public void deleteLocation(Long id) {
         LibLocation location = libLocationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Location not found with ID: " + id));
+        if (location.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(location.getFacility().getId());
+        }
 
         boolean isReferenced = batchRepository.existsByLocationId(id);
         if (isReferenced) {

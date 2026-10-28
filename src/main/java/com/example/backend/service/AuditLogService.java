@@ -9,6 +9,7 @@ import com.example.backend.entity.User;
 import com.example.backend.repository.AuditLogRepository;
 import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.UserRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -34,13 +35,16 @@ public class AuditLogService {
     private final AuditLogRepository auditLogRepository;
     private final FacilityRepository facilityRepository;
     private final UserRepository userRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public AuditLogService(AuditLogRepository auditLogRepository,
                            FacilityRepository facilityRepository,
-                           UserRepository userRepository) {
+                           UserRepository userRepository,
+                           FacilityAccessGuard facilityAccessGuard) {
         this.auditLogRepository = auditLogRepository;
         this.facilityRepository = facilityRepository;
         this.userRepository = userRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. REUSABLE LOG ACTION ENGINE
@@ -134,6 +138,7 @@ public class AuditLogService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is strictly required to query audit logs.");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         if (!facilityRepository.existsById(facilityId)) {
             throw new RuntimeException("Facility not found with id: " + facilityId);
         }
@@ -172,6 +177,7 @@ public class AuditLogService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is strictly required to query audit log summary.");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         if (!facilityRepository.existsById(facilityId)) {
             throw new RuntimeException("Facility not found with id: " + facilityId);
         }

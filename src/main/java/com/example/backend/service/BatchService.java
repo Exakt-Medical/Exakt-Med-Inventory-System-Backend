@@ -21,6 +21,7 @@ import com.example.backend.repository.LibLocationRepository;
 import com.example.backend.entity.LibLocation;
 import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.batch.BatchSummaryDto;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -54,6 +55,7 @@ public class BatchService {
     private final InventoryTransactionService inventoryTransactionService;
     private final UserRepository userRepository;
     private final LibLocationRepository libLocationRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public BatchService(BatchRepository batchRepository,
                         OrderedItemRepository orderedItemRepository,
@@ -63,7 +65,8 @@ public class BatchService {
                         AuditLogService auditLogService,
                         InventoryTransactionService inventoryTransactionService,
                         UserRepository userRepository,
-                        LibLocationRepository libLocationRepository) {
+                        LibLocationRepository libLocationRepository,
+                        FacilityAccessGuard facilityAccessGuard) {
         this.batchRepository = batchRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.skuRepository = skuRepository;
@@ -73,6 +76,7 @@ public class BatchService {
         this.inventoryTransactionService = inventoryTransactionService;
         this.userRepository = userRepository;
         this.libLocationRepository = libLocationRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. RECEIVE SINGLE BATCH (Pharmacist / Admin / SuperAdmin)
@@ -103,6 +107,8 @@ public class BatchService {
         if (facility == null) {
             throw new RuntimeException("Facility is required for receiving batch.");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(facility.getId());
 
         String trimmedBatchNum = request.getBatchNum() != null ? request.getBatchNum().trim() : "";
         if (trimmedBatchNum.isEmpty()) {
@@ -158,8 +164,9 @@ public class BatchService {
 
         // INCREMENT SKU UNITS only if status is Available (quarantined batches do not increment active SKU units)
         if (savedBatch.getStatus() == Batch.Status.Available) {
-            Sku sku = orderedItem.getSku();
-            if (sku != null) {
+            Sku skuRef = orderedItem.getSku();
+            if (skuRef != null) {
+                Sku sku = skuRepository.findByIdForUpdate(skuRef.getId()).orElse(skuRef);
                 long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
                 long unitsToAdd = savedBatch.getUnits() != null ? savedBatch.getUnits() : 0L;
                 sku.setUnits(currentUnits + unitsToAdd);
@@ -254,6 +261,8 @@ public class BatchService {
             throw new IllegalArgumentException("Facility ID is required.");
         }
 
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         int pageIndex = Math.max(0, page);
         int pageSize = size > 0 ? size : 10;
 
@@ -298,6 +307,9 @@ public class BatchService {
         if (facilityId == null) {
             throw new IllegalArgumentException("Facility ID is required.");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         LocalDate nearExpiryDate = LocalDate.now().plusDays(90);
 
         long totalBatches = batchRepository.countByFacilityId(facilityId);
@@ -320,6 +332,7 @@ public class BatchService {
         if (facilityId == null) {
             return Collections.emptyList();
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         return batchRepository.findDistinctSkuNamesByFacilityId(facilityId);
     }
 
@@ -330,6 +343,7 @@ public class BatchService {
         if (facilityId == null || skuId == null) {
             return Collections.emptyList();
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         return batchRepository.findBatchesForSkuOrderByReceivedAtAsc(facilityId, skuId)
                 .stream()
                 .map(this::mapToResponseDto)
@@ -362,6 +376,9 @@ public class BatchService {
     public BatchResponseDto getBatchById(Long id) {
         Batch batch = batchRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Batch not found with id: " + id));
+        if (batch.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        }
         return mapToResponseDto(batch);
     }
 
@@ -369,8 +386,12 @@ public class BatchService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public BatchResponseDto updateBatchStatus(Long id, Batch.Status status, String notes) {
-        Batch batch = batchRepository.findById(id)
+        Batch batch = batchRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("Batch not found with id: " + id));
+
+        if (batch.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        }
 
         Batch.Status oldStatus = batch.getStatus();
         if (status != null && status != oldStatus) {
@@ -422,8 +443,12 @@ public class BatchService {
             throw new IllegalArgumentException("Accepted units is required.");
         }
 
-        Batch batch = batchRepository.findById(id)
+        Batch batch = batchRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("Batch not found with id: " + id));
+
+        if (batch.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        }
 
         if (batch.getStatus() != Batch.Status.Quarantined) {
             throw new IllegalStateException("Only Quarantined batches can be released. Current status is " + batch.getStatus());
@@ -464,11 +489,15 @@ public class BatchService {
 
         Batch savedBatch = batchRepository.save(batch);
 
-        // 2. Increment active SKU inventory by accepted units only
-        Sku sku = savedBatch.getOrderedItem() != null ? savedBatch.getOrderedItem().getSku() : null;
+        // 2. Increment active SKU inventory by accepted units only (under pessimistic lock)
+        Sku skuRef = savedBatch.getOrderedItem() != null ? savedBatch.getOrderedItem().getSku() : null;
+        Sku sku = skuRef != null ? skuRepository.findByIdForUpdate(skuRef.getId()).orElse(skuRef) : null;
         long currentSkuUnits = sku != null && sku.getUnits() != null ? sku.getUnits() : 0L;
-        adjustSkuUnits(savedBatch, acceptedUnits);
-        long finalSkuUnits = sku != null && sku.getUnits() != null ? sku.getUnits() : currentSkuUnits + acceptedUnits;
+        long finalSkuUnits = Math.max(0L, currentSkuUnits + acceptedUnits);
+        if (sku != null) {
+            sku.setUnits(finalSkuUnits);
+            skuRepository.save(sku);
+        }
 
         User currentUser = getCurrentUser();
         LocalDateTime now = LocalDateTime.now();
@@ -616,6 +645,9 @@ public class BatchService {
         if (skuId == null) {
             throw new IllegalArgumentException("SKU ID is required to process expired batches.");
         }
+
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
+
         LocalDate today = LocalDate.now();
         List<Batch> expiredBatches = batchRepository.findExpiredBatches(
                 facilityId, skuId, today);
@@ -624,10 +656,14 @@ public class BatchService {
             long batchUnits = batch.getUnits() != null ? batch.getUnits() : 0L;
             batch.setStatus(Batch.Status.Expired);
             if (batchUnits > 0 && !Boolean.TRUE.equals(batch.getSkuDeducted())) {
-                Sku s = batch.getOrderedItem() != null ? batch.getOrderedItem().getSku() : null;
+                Sku sRef = batch.getOrderedItem() != null ? batch.getOrderedItem().getSku() : null;
+                Sku s = sRef != null ? skuRepository.findByIdForUpdate(sRef.getId()).orElse(sRef) : null;
                 long curUnits = s != null && s.getUnits() != null ? s.getUnits() : 0L;
-                adjustSkuUnits(batch, -batchUnits);
                 long newUnits = Math.max(0L, curUnits - batchUnits);
+                if (s != null) {
+                    s.setUnits(newUnits);
+                    skuRepository.save(s);
+                }
                 batch.setSkuDeducted(true);
 
                 if (s != null) {
@@ -711,6 +747,7 @@ public class BatchService {
         }
 
         LocalDate today = LocalDate.now();
+        // Uses PESSIMISTIC_WRITE lock in BatchRepository.findAvailableBatchesForSkuFEFO
         List<Batch> availableBatches = batchRepository.findAvailableBatchesForSkuFEFO(
                 skuId, facilityId, Batch.Status.Available, today);
 
@@ -747,7 +784,7 @@ public class BatchService {
         if (batchId == null || unitsToAdd <= 0) {
             return null;
         }
-        Batch batch = batchRepository.findById(batchId)
+        Batch batch = batchRepository.findByIdForUpdate(batchId)
                 .orElseThrow(() -> new RuntimeException("Target batch not found with id: " + batchId));
 
         if (skuId != null && batch.getOrderedItem() != null && batch.getOrderedItem().getSku() != null) {
@@ -773,7 +810,7 @@ public class BatchService {
         if (batchId == null || unitsToDeduct <= 0) {
             return null;
         }
-        Batch batch = batchRepository.findById(batchId)
+        Batch batch = batchRepository.findByIdForUpdate(batchId)
                 .orElseThrow(() -> new RuntimeException("Target batch not found with id: " + batchId));
 
         if (skuId != null && batch.getOrderedItem() != null && batch.getOrderedItem().getSku() != null) {
@@ -801,11 +838,12 @@ public class BatchService {
         return !batchRepository.findBatchesForSkuOrderByReceivedAtAsc(facilityId, skuId).isEmpty();
     }
 
-    // HELPER: ADJUST ACTIVE SKU UNITS
+    // HELPER: ADJUST ACTIVE SKU UNITS (Under Pessimistic Lock)
     private void adjustSkuUnits(Batch batch, long delta) {
         OrderedItem item = batch.getOrderedItem();
         if (item != null && item.getSku() != null) {
-            Sku sku = item.getSku();
+            Sku skuRef = item.getSku();
+            Sku sku = skuRepository.findByIdForUpdate(skuRef.getId()).orElse(skuRef);
             long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
             long newUnits = Math.max(0L, currentUnits + delta);
             sku.setUnits(newUnits);
@@ -873,10 +911,18 @@ public class BatchService {
         Batch batch = batchRepository.findById(batchId)
                 .orElseThrow(() -> new RuntimeException("Batch not found with ID: " + batchId));
 
+        if (batch.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        }
+
         LibLocation location = null;
         if (locationId != null) {
             location = libLocationRepository.findById(locationId)
                     .orElseThrow(() -> new RuntimeException("Storage location not found with ID: " + locationId));
+            if (location.getFacility() != null && batch.getFacility() != null &&
+                    !location.getFacility().getId().equals(batch.getFacility().getId())) {
+                throw new RuntimeException("Storage location belongs to another facility.");
+            }
         }
 
         batch.setLocation(location);

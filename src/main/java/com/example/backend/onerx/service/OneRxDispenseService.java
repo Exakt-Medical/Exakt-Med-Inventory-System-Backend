@@ -8,8 +8,10 @@ import com.example.backend.entity.User;
 import com.example.backend.onerx.dto.OneRxDispenseRequestDto;
 import com.example.backend.onerx.dto.OneRxDispenseResponseDto;
 import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.UserRepository;
+import com.example.backend.security.FacilityAccessGuard;
 import com.example.backend.service.AuditLogService;
 import com.example.backend.service.BatchService;
 import com.example.backend.service.InventoryTransactionService;
@@ -24,10 +26,13 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 
 @Service
 public class OneRxDispenseService {
@@ -36,27 +41,34 @@ public class OneRxDispenseService {
     private final FacilityRepository facilityRepository;
     private final BatchService batchService;
     private final InventoryTransactionService inventoryTransactionService;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
     private final AuditLogService auditLogService;
     private final UserRepository userRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public OneRxDispenseService(SkuRepository skuRepository,
                                 FacilityRepository facilityRepository,
                                 BatchService batchService,
                                 InventoryTransactionService inventoryTransactionService,
+                                InventoryTransactionRepository inventoryTransactionRepository,
                                 AuditLogService auditLogService,
-                                UserRepository userRepository) {
+                                UserRepository userRepository,
+                                FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.facilityRepository = facilityRepository;
         this.batchService = batchService;
         this.inventoryTransactionService = inventoryTransactionService;
+        this.inventoryTransactionRepository = inventoryTransactionRepository;
         this.auditLogService = auditLogService;
         this.userRepository = userRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     /**
      * Executes atomic dispensing of medications requested by OneRx.
      *
-     * Validates all requested SKUs and available stock upfront.
+     * Validates all requested SKUs and available stock upfront with pessimistic row locks
+     * and idempotency verification on rx_number.
      * If all are valid, performs FEFO batch deductions and logs individual per-batch
      * ledger entries in inventory_transactions with progressive running balances.
      */
@@ -70,6 +82,7 @@ public class OneRxDispenseService {
         if (rxNumber == null || rxNumber.trim().isBlank()) {
             throw new IllegalArgumentException("Field 'rx_number' is required in the request body.");
         }
+        String refNumber = rxNumber.trim();
 
         String facilityCode = request.getFacilityCode();
         if (facilityCode == null || facilityCode.trim().isBlank()) {
@@ -79,12 +92,22 @@ public class OneRxDispenseService {
         Facility facility = resolveFacility(facilityCode.trim())
                 .orElseThrow(() -> new IllegalArgumentException("Facility not found with code: " + facilityCode));
 
+        // Enforce facility access if called by a regular user token
+        facilityAccessGuard.verifyFacilityAccess(facility.getId());
+
+        // Idempotency guard: Prevent duplicate dispense for the same rx_number in this facility
+        if (inventoryTransactionRepository.existsByFacilityIdAndTransactionTypeAndReferenceNumberIgnoreCase(
+                facility.getId(), InventoryTransaction.Type.DISPENSE, refNumber)) {
+            throw new IllegalArgumentException(
+                    "Duplicate rx_number: Prescription '" + refNumber + "' has already been dispensed in facility '" + facility.getName() + "'.");
+        }
+
         if (request.getMedicines() == null || request.getMedicines().isEmpty()) {
             throw new IllegalArgumentException("Medicines list cannot be empty.");
         }
 
         // ==========================================
-        // PHASE 1: ATOMIC VALIDATION (ALL-OR-NOTHING)
+        // PHASE 1: ATOMIC VALIDATION & PESSIMISTIC LOCKING
         // ==========================================
         class ValidatedItem {
             final Sku sku;
@@ -96,42 +119,60 @@ public class OneRxDispenseService {
             }
         }
 
-        List<ValidatedItem> itemsToDispense = new ArrayList<>();
-        Set<Long> processedSkuIds = new HashSet<>();
-        long totalUnitsToDeduct = 0L;
-        int totalBrandItems = 0;
-
+        // First collect and sort distinct SKU names to acquire pessimistic locks in deterministic order (prevents deadlocks)
+        Set<String> sortedSkuNames = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         for (OneRxDispenseRequestDto.MedicineDispenseDto med : request.getMedicines()) {
             if (med.getBrands() == null || med.getBrands().isEmpty()) {
                 throw new IllegalArgumentException("Each medicine must have at least one brand SKU specified.");
             }
-
             for (OneRxDispenseRequestDto.BrandDispenseDto brand : med.getBrands()) {
                 String skuName = brand.getSkuName();
                 if (skuName == null || skuName.trim().isBlank()) {
                     throw new IllegalArgumentException("SKU name is required for brand dispense item.");
                 }
-
                 Long requestedUnits = brand.getDispensedUnits();
                 if (requestedUnits == null || requestedUnits <= 0) {
                     throw new IllegalArgumentException("Dispensed units must be greater than zero for SKU: " + skuName);
                 }
+                sortedSkuNames.add(skuName.trim());
+            }
+        }
 
-                Sku sku = skuRepository.findByFacilityIdAndName(facility.getId(), skuName.trim())
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                String.format("SKU '%s' not found for facility '%s'.", skuName.trim(), facility.getName())));
+        // Acquire PESSIMISTIC_WRITE locks on all target SKUs in alphabetical order
+        Map<String, Sku> lockedSkusByName = new HashMap<>();
+        for (String name : sortedSkuNames) {
+            Sku lockedSku = skuRepository.findByFacilityIdAndNameForUpdate(facility.getId(), name)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            String.format("SKU '%s' not found for facility '%s'.", name, facility.getName())));
+            lockedSkusByName.put(name.toUpperCase(), lockedSku);
+        }
 
+        List<ValidatedItem> itemsToDispense = new ArrayList<>();
+        Set<Long> processedSkuIds = new HashSet<>();
+        Map<Long, Long> cumulativeRequestedBySkuId = new HashMap<>();
+        long totalUnitsToDeduct = 0L;
+        int totalBrandItems = 0;
+
+        for (OneRxDispenseRequestDto.MedicineDispenseDto med : request.getMedicines()) {
+            for (OneRxDispenseRequestDto.BrandDispenseDto brand : med.getBrands()) {
+                String skuName = brand.getSkuName().trim();
+                Long requestedUnits = brand.getDispensedUnits();
+
+                Sku sku = lockedSkusByName.get(skuName.toUpperCase());
                 long availableUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
-                if (availableUnits < requestedUnits) {
+                long cumulativeRequested = cumulativeRequestedBySkuId.getOrDefault(sku.getId(), 0L) + requestedUnits;
+
+                if (availableUnits < cumulativeRequested) {
                     throw new IllegalArgumentException(String.format(
                             "Insufficient stock for SKU '%s' (%s). Requested: %d, Available: %d",
                             sku.getName(),
                             sku.getBrandName() != null ? sku.getBrandName() : "N/A",
-                            requestedUnits,
+                            cumulativeRequested,
                             availableUnits
                     ));
                 }
 
+                cumulativeRequestedBySkuId.put(sku.getId(), cumulativeRequested);
                 itemsToDispense.add(new ValidatedItem(sku, requestedUnits));
                 processedSkuIds.add(sku.getId());
                 totalUnitsToDeduct += requestedUnits;
@@ -144,7 +185,6 @@ public class OneRxDispenseService {
         // ==========================================
         User currentUser = getCurrentUser();
         LocalDateTime eventTime = parseDispensedAt(request.getDispensedAt());
-        String refNumber = rxNumber.trim();
 
         String patientLabel = (request.getPatientName() != null && !request.getPatientName().isBlank())
                 ? request.getPatientName().trim()
@@ -166,7 +206,7 @@ public class OneRxDispenseService {
             Sku sku = item.sku;
             long unitsToDispense = item.unitsToDispense;
 
-            // 1. FEFO Batch Deduction
+            // 1. FEFO Batch Deduction (locks candidate batches with PESSIMISTIC_WRITE)
             List<BatchService.BatchDeductionDetail> deductions = batchService.deductBatchesFEFO(
                     sku.getId(),
                     facility.getId(),
@@ -176,6 +216,7 @@ public class OneRxDispenseService {
             long currentRunningBalance = sku.getUnits() != null ? sku.getUnits() : 0L;
 
             if (!deductions.isEmpty()) {
+                long totalDeductedFromBatches = 0L;
                 // Option A: Log individual ledger rows per batch with progressive running balance
                 for (BatchService.BatchDeductionDetail detail : deductions) {
                     long deductedFromBatch = detail.getDeductedUnits();
@@ -206,6 +247,33 @@ public class OneRxDispenseService {
                     );
 
                     currentRunningBalance = balanceAfterThisBatch;
+                    totalDeductedFromBatches += deductedFromBatch;
+                }
+
+                // If legacy unbatched stock covered the remainder
+                long unbatchedRemainder = unitsToDispense - totalDeductedFromBatches;
+                if (unbatchedRemainder > 0) {
+                    long balanceAfter = currentRunningBalance - unbatchedRemainder;
+                    LocalDateTime txTime = eventTime.plusSeconds(secondOffset++);
+                    inventoryTransactionService.recordTransaction(
+                            sku,
+                            facility,
+                            null,
+                            currentUser,
+                            dispensedByLabel,
+                            InventoryTransaction.Type.DISPENSE,
+                            refNumber,
+                            null,
+                            null,
+                            null,
+                            unbatchedRemainder,
+                            currentRunningBalance,
+                            balanceAfter,
+                            "OneRx Dispense - Patient: " + patientLabel,
+                            baseNotes,
+                            txTime
+                    );
+                    currentRunningBalance = balanceAfter;
                 }
             } else {
                 // Fallback for unbatched legacy SKU units

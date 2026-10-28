@@ -26,6 +26,7 @@ import com.example.backend.repository.UserRepository;
 import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.sku.SkuDropdownDto;
 import com.example.backend.dto.sku.SkuSummaryDto;
+import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -58,6 +59,7 @@ public class SkuService {
     private final OrderedItemRepository orderedItemRepository;
     private final LibPackagingUnitRepository libPackagingUnitRepository;
     private final DispensedLogRepository dispensedLogRepository;
+    private final FacilityAccessGuard facilityAccessGuard;
 
     public SkuService(SkuRepository skuRepository,
                       FacilityRepository facilityRepository,
@@ -69,7 +71,8 @@ public class SkuService {
                       RestockRequestRepository restockRequestRepository,
                       OrderedItemRepository orderedItemRepository,
                       LibPackagingUnitRepository libPackagingUnitRepository,
-                      DispensedLogRepository dispensedLogRepository) {
+                      DispensedLogRepository dispensedLogRepository,
+                      FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.facilityRepository = facilityRepository;
         this.libMedicineRepository = libMedicineRepository;
@@ -81,6 +84,7 @@ public class SkuService {
         this.orderedItemRepository = orderedItemRepository;
         this.libPackagingUnitRepository = libPackagingUnitRepository;
         this.dispensedLogRepository = dispensedLogRepository;
+        this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // --- AUTOMATED ATTRIBUTE EXTRACTION & SKU GENERATION ---
@@ -249,7 +253,7 @@ public class SkuService {
         }
     }
 
-    public PackagingInfo    resolvePackaging(SkuRequestDto request, LibMedicine med) {
+    public PackagingInfo resolvePackaging(SkuRequestDto request, LibMedicine med) {
         // 1. If packagingUnitCode provided, look up in lib_packaging_unit
         if (request.getPackagingUnitCode() != null && !request.getPackagingUnitCode().trim().isEmpty()) {
             Optional<LibPackagingUnit> opt = libPackagingUnitRepository.findByCode(request.getPackagingUnitCode().trim().toUpperCase());
@@ -395,6 +399,8 @@ public class SkuService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public SkuResponseDto createSku(SkuRequestDto request) {
+        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
+
         Facility facility = facilityRepository.findById(request.getFacilityId())
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
 
@@ -478,6 +484,7 @@ public class SkuService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is strictly required.");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         if (!facilityRepository.existsById(facilityId)) {
             throw new RuntimeException("Facility not found with id: " + facilityId);
         }
@@ -519,6 +526,7 @@ public class SkuService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is strictly required.");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
 
         long totalSkus = skuRepository.countByFacilityId(facilityId);
         long optimalCount = skuRepository.countOptimalByFacilityId(facilityId);
@@ -540,6 +548,7 @@ public class SkuService {
         if (facilityId == null) {
             return Collections.emptyList();
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
 
         List<Sku> skus = skuRepository.findDropdownSkusByFacilityId(facilityId);
         Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(facilityId);
@@ -575,6 +584,9 @@ public class SkuService {
     public SkuResponseDto getSkuById(Long id) {
         Sku sku = skuRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
+        if (sku.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(sku.getFacility().getId());
+        }
         return mapToResponseDto(sku, null);
     }
 
@@ -582,8 +594,13 @@ public class SkuService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public SkuResponseDto updateSku(Long id, SkuRequestDto request) {
-        Sku existingSku = skuRepository.findById(id)
+        Sku existingSku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
+
+        if (existingSku.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(existingSku.getFacility().getId());
+        }
+        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
 
         // If facility changed
         if (!existingSku.getFacility().getId().equals(request.getFacilityId())) {
@@ -664,8 +681,12 @@ public class SkuService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public void deleteSku(Long id) {
-        Sku sku = skuRepository.findById(id)
+        Sku sku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
+
+        if (sku.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(sku.getFacility().getId());
+        }
 
         skuRepository.delete(sku);
 
@@ -687,8 +708,12 @@ public class SkuService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public SkuResponseDto adjustStock(Long id, SkuStockAdjustmentDto request) {
-        Sku sku = skuRepository.findById(id)
+        Sku sku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
+
+        if (sku.getFacility() != null) {
+            facilityAccessGuard.verifyFacilityAccess(sku.getFacility().getId());
+        }
 
         long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
         long newUnits;
@@ -882,6 +907,7 @@ public class SkuService {
         if (facilityId == null) {
             throw new RuntimeException("Facility ID is strictly required.");
         }
+        facilityAccessGuard.verifyFacilityAccess(facilityId);
         if (!facilityRepository.existsById(facilityId)) {
             throw new RuntimeException("Facility not found with id: " + facilityId);
         }
