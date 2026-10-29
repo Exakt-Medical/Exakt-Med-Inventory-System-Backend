@@ -13,6 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 
 /**
@@ -28,7 +30,7 @@ import java.util.List;
 @Component
 public class OneRxApiKeyFilter extends OncePerRequestFilter {
 
-    @Value("${onerx.api.key:onerx_live_sec_7f9b8c2d1e4a}")
+    @Value("${onerx.api.key:}")
     private String expectedApiKey;
 
     @Override
@@ -46,7 +48,7 @@ public class OneRxApiKeyFilter extends OncePerRequestFilter {
         if (isOneRxPath && SecurityContextHolder.getContext().getAuthentication() == null) {
             String apiKey = extractApiKey(request);
 
-            if (apiKey != null && apiKey.equals(expectedApiKey)) {
+            if (isValidApiKey(apiKey)) {
                 // Grant authenticated session for OneRx integration
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                         "OneRx-Integration-Client",
@@ -76,11 +78,21 @@ public class OneRxApiKeyFilter extends OncePerRequestFilter {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String candidate = authHeader.substring(7).trim();
             // If the bearer token matches our API key, treat it as API key
-            if (candidate.equals(expectedApiKey)) {
+            if (isValidApiKey(candidate)) {
                 return candidate;
             }
         }
 
         return null;
+    }
+
+    private boolean isValidApiKey(String candidate) {
+        if (candidate == null || candidate.isBlank() || expectedApiKey == null || expectedApiKey.isBlank()) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                candidate.getBytes(StandardCharsets.UTF_8),
+                expectedApiKey.trim().getBytes(StandardCharsets.UTF_8)
+        );
     }
 }
