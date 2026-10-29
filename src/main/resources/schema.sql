@@ -10,8 +10,9 @@
 -- Entity: Project
 CREATE TABLE IF NOT EXISTS projects (
     id BIGSERIAL PRIMARY KEY,
+    ipkras_project_id BIGINT UNIQUE,
     name VARCHAR(255) NOT NULL,
-    project_code VARCHAR(255) UNIQUE,
+    project_code VARCHAR(255) NOT NULL UNIQUE,
     created_at TIMESTAMP(6),
     updated_at TIMESTAMP(6)
 );
@@ -19,13 +20,14 @@ CREATE TABLE IF NOT EXISTS projects (
 -- Entity: Facility
 CREATE TABLE IF NOT EXISTS facilities (
     id BIGSERIAL PRIMARY KEY,
+    ipkras_facility_id BIGINT UNIQUE,
     project_id BIGINT NOT NULL,
-    facility_code VARCHAR(255) UNIQUE,
+    facility_code VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
-    contact_person VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    phone VARCHAR(255) NOT NULL,
-    address VARCHAR(255) NOT NULL,
+    contact_person VARCHAR(255),
+    email VARCHAR(255),
+    phone VARCHAR(255),
+    address VARCHAR(255),
     status VARCHAR(255) NOT NULL CHECK (status IN ('Active', 'Inactive')),
     created_at TIMESTAMP(6),
     updated_at TIMESTAMP(6),

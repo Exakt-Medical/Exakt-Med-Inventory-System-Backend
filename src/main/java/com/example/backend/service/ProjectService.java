@@ -29,15 +29,16 @@ public class ProjectService {
     @Transactional
     @PreAuthorize("hasRole('SuperAdmin')")
     public ProjectResponseDto createProject(ProjectRequestDto request) {
+        String trimmedCode = request.getProjectCode().trim();
+        if (projectRepository.existsByProjectCodeIgnoreCase(trimmedCode)) {
+            throw new RuntimeException("Project code '" + trimmedCode + "' already exists");
+        }
+
         Project project = new Project();
-        project.setName(request.getName());
+        project.setName(request.getName().trim());
+        project.setProjectCode(trimmedCode);
 
-        // 1. Save and flush so H2 assigns the auto-increment ID immediately
-        Project savedProject = projectRepository.saveAndFlush(project);
-
-        // 2. Set the formatted code: PRJ-001, PRJ-010, etc.
-        savedProject.setProjectCode(String.format("PRJ-%03d", savedProject.getId()));
-        savedProject = projectRepository.save(savedProject);
+        Project savedProject = projectRepository.save(project);
 
         return mapToResponseDto(savedProject, "Project Created Successfully");
     }
@@ -61,12 +62,21 @@ public class ProjectService {
     }
 
     // 4. UPDATE PROJECT (SuperAdmin only)
+    @Transactional
     @PreAuthorize("hasRole('SuperAdmin')")
     public ProjectResponseDto updateProject(Long id, ProjectRequestDto request) {
         Project existingProject = projectRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
 
-        existingProject.setName(request.getName());
+        String trimmedCode = request.getProjectCode().trim();
+        projectRepository.findByProjectCodeIgnoreCase(trimmedCode)
+                .filter(p -> !p.getId().equals(id))
+                .ifPresent(p -> {
+                    throw new RuntimeException("Project code '" + trimmedCode + "' already exists");
+                });
+
+        existingProject.setName(request.getName().trim());
+        existingProject.setProjectCode(trimmedCode);
 
         Project updatedProject = projectRepository.save(existingProject);
         return mapToResponseDto(updatedProject, "Project Updated Successfully");

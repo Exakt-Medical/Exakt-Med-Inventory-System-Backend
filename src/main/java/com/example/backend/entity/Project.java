@@ -16,10 +16,13 @@ public class Project {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(unique = true)
+    private Long ipkrasProjectId;
+
     @Column(nullable = false)
     private String name;
 
-    @Column(unique = true) // Allows temporary null so the ID can be generated first
+    @Column(nullable = false, unique = true)
     private String projectCode;
 
     @Column(updatable = false)

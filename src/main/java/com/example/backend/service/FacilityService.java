@@ -42,21 +42,22 @@ public class FacilityService {
         Project project = projectRepository.findById(request.getProjectId())
                 .orElseThrow(() -> new RuntimeException("Project not found with id: " + request.getProjectId()));
 
+        String trimmedCode = request.getFacilityCode().trim();
+        if (facilityRepository.existsByFacilityCodeIgnoreCase(trimmedCode)) {
+            throw new RuntimeException("Facility code '" + trimmedCode + "' already exists");
+        }
+
         Facility facility = new Facility();
         facility.setProject(project);
-        facility.setName(request.getName());
+        facility.setFacilityCode(trimmedCode);
+        facility.setName(request.getName().trim());
         facility.setContactPerson(request.getContactPerson());
         facility.setEmail(request.getEmail());
         facility.setPhone(request.getPhone());
         facility.setAddress(request.getAddress());
         facility.setStatus(request.getStatus() != null ? request.getStatus() : Facility.Status.Active);
 
-        // Save initially to generate the auto-increment ID
-        Facility savedFacility = facilityRepository.saveAndFlush(facility);
-
-        // Auto-generate facilityCode format: FAC-001, FAC-010, etc.
-        savedFacility.setFacilityCode(String.format("FAC-%03d", savedFacility.getId()));
-        savedFacility = facilityRepository.save(savedFacility);
+        Facility savedFacility = facilityRepository.save(facility);
 
         auditLogService.logAction(
                 savedFacility,
@@ -92,6 +93,13 @@ public class FacilityService {
         Facility existingFacility = facilityRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Facility not found with id: " + id));
 
+        String trimmedCode = request.getFacilityCode().trim();
+        facilityRepository.findByFacilityCodeIgnoreCase(trimmedCode)
+                .filter(f -> !f.getId().equals(id))
+                .ifPresent(f -> {
+                    throw new RuntimeException("Facility code '" + trimmedCode + "' already exists");
+                });
+
         // If project reference changed
         if (!existingFacility.getProject().getId().equals(request.getProjectId())) {
             Project project = projectRepository.findById(request.getProjectId())
@@ -99,7 +107,8 @@ public class FacilityService {
             existingFacility.setProject(project);
         }
 
-        existingFacility.setName(request.getName());
+        existingFacility.setFacilityCode(trimmedCode);
+        existingFacility.setName(request.getName().trim());
         existingFacility.setContactPerson(request.getContactPerson());
         existingFacility.setEmail(request.getEmail());
         existingFacility.setPhone(request.getPhone());

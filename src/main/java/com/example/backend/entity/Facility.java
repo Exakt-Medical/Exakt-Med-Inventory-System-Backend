@@ -21,26 +21,29 @@ public class Facility {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(unique = true)
+    private Long ipkrasFacilityId;
+
     @ManyToOne
     @JoinColumn(name = "projectId", nullable = false)
     private Project project;
 
-    @Column(unique = true)
+    @Column(nullable = false, unique = true)
     private String facilityCode;
 
     @Column(nullable = false)
     private String name;
 
-    @Column(nullable = false)
+    @Column
     private String contactPerson;
 
-    @Column(nullable = false)
+    @Column
     private String email;
 
-    @Column(nullable = false)
+    @Column
     private String phone;
 
-    @Column(nullable = false)
+    @Column
     private String address;
 
     @Enumerated(EnumType.STRING)
