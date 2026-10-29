@@ -146,6 +146,11 @@ public class BatchService {
             throw new RuntimeException("Storage location '" + location.getCode() + "' belongs to another facility.");
         }
 
+        Batch.Status initialStatus = request.getStatus() != null ? request.getStatus() : Batch.Status.Available;
+        if (initialStatus == Batch.Status.Available && !request.getExpiryDate().isAfter(LocalDate.now())) {
+            throw new RuntimeException("Cannot receive an already-expired batch as Available stock. Expiry date must be after today.");
+        }
+
         Batch batch = new Batch();
         batch.setFacility(facility);
         batch.setOrderedItem(orderedItem);
@@ -157,7 +162,8 @@ public class BatchService {
         batch.setUnits(units);
         batch.setManufactureDate(request.getManufactureDate());
         batch.setExpiryDate(request.getExpiryDate());
-        batch.setStatus(request.getStatus() != null ? request.getStatus() : Batch.Status.Available);
+        batch.setStatus(initialStatus);
+        batch.setSkuDeducted(initialStatus == Batch.Status.Expired);
         batch.setNotes(request.getNotes());
 
         Batch savedBatch = batchRepository.save(batch);
@@ -394,18 +400,89 @@ public class BatchService {
         }
 
         Batch.Status oldStatus = batch.getStatus();
+        long batchUnits = batch.getUnits() != null ? batch.getUnits() : 0L;
+        String trimmedNotes = notes != null ? notes.trim() : batch.getNotes();
+
         if (status != null && status != oldStatus) {
-            // 1. Available -> Quarantined: deduct units from active SKU inventory
+            // 1. Available -> Quarantined: deduct units from active SKU inventory if not already deducted
             if (oldStatus == Batch.Status.Available && status == Batch.Status.Quarantined) {
-                adjustSkuUnits(batch, -(batch.getUnits() != null ? batch.getUnits() : 0L));
+                if (batchUnits > 0 && !Boolean.TRUE.equals(batch.getSkuDeducted())) {
+                    adjustSkuUnitsAndRecordTransaction(
+                            batch,
+                            -batchUnits,
+                            InventoryTransaction.Type.ADJUSTMENT_SUB,
+                            "QUAR-" + batch.getBatchNum(),
+                            "Batch moved to Quarantine",
+                            trimmedNotes
+                    );
+                }
+                batch.setSkuDeducted(false);
             }
-            // 2. Available -> Expired: deduct units from active SKU inventory
+            // 2. Available -> Expired: deduct units from active SKU inventory & flag skuDeducted = true
             else if (oldStatus == Batch.Status.Available && status == Batch.Status.Expired) {
-                adjustSkuUnits(batch, -(batch.getUnits() != null ? batch.getUnits() : 0L));
+                if (batchUnits > 0 && !Boolean.TRUE.equals(batch.getSkuDeducted())) {
+                    adjustSkuUnitsAndRecordTransaction(
+                            batch,
+                            -batchUnits,
+                            InventoryTransaction.Type.EXPIRY_DEDUCTION,
+                            "EXP-" + batch.getBatchNum(),
+                            "Expired stock write-off",
+                            trimmedNotes
+                    );
+                }
+                batch.setSkuDeducted(true);
             }
-            // 3. Expired -> Available: add units back if mistakenly marked expired
+            // 3. Quarantined -> Available: validate not expired, add units to active SKU inventory
+            else if (oldStatus == Batch.Status.Quarantined && status == Batch.Status.Available) {
+                if (batch.getExpiryDate() != null && !batch.getExpiryDate().isAfter(LocalDate.now())) {
+                    throw new RuntimeException("Cannot release batch to Available because its expiry date (" + batch.getExpiryDate() + ") has already passed.");
+                }
+                if (batchUnits > 0) {
+                    adjustSkuUnitsAndRecordTransaction(
+                            batch,
+                            batchUnits,
+                            InventoryTransaction.Type.QUARANTINE_RELEASE,
+                            "BATCH-" + batch.getBatchNum(),
+                            "Batch Released from Quarantine",
+                            trimmedNotes
+                    );
+                }
+                batch.setSkuDeducted(false);
+            }
+            // 4. Quarantined -> Expired: never in active SKU stock, mark skuDeducted = true to prevent future double deduction
+            else if (oldStatus == Batch.Status.Quarantined && status == Batch.Status.Expired) {
+                batch.setSkuDeducted(true);
+            }
+            // 5. Expired -> Available: validate expiry date and only add back if previously deducted from SKU
             else if (oldStatus == Batch.Status.Expired && status == Batch.Status.Available) {
-                adjustSkuUnits(batch, batch.getUnits() != null ? batch.getUnits() : 0L);
+                if (batch.getExpiryDate() != null && !batch.getExpiryDate().isAfter(LocalDate.now())) {
+                    throw new RuntimeException("Cannot mark batch as Available because its expiry date (" + batch.getExpiryDate() + ") has already passed.");
+                }
+                if (batchUnits > 0 && Boolean.TRUE.equals(batch.getSkuDeducted())) {
+                    adjustSkuUnitsAndRecordTransaction(
+                            batch,
+                            batchUnits,
+                            InventoryTransaction.Type.ADJUSTMENT_ADD,
+                            "BATCH-" + batch.getBatchNum(),
+                            "Batch restored from Expired to Available",
+                            trimmedNotes
+                    );
+                }
+                batch.setSkuDeducted(false);
+            }
+            // 6. Expired -> Quarantined: if units were still in active SKU stock (unprocessed expiry), deduct them
+            else if (oldStatus == Batch.Status.Expired && status == Batch.Status.Quarantined) {
+                if (batchUnits > 0 && !Boolean.TRUE.equals(batch.getSkuDeducted())) {
+                    adjustSkuUnitsAndRecordTransaction(
+                            batch,
+                            -batchUnits,
+                            InventoryTransaction.Type.ADJUSTMENT_SUB,
+                            "QUAR-" + batch.getBatchNum(),
+                            "Batch moved to Quarantine",
+                            trimmedNotes
+                    );
+                }
+                batch.setSkuDeducted(false);
             }
 
             batch.setStatus(status);
@@ -469,8 +546,13 @@ public class BatchService {
             throw new IllegalArgumentException("Rejection reason is required when accepting fewer units than quarantined.");
         }
 
+        if (acceptedUnits > 0 && batch.getExpiryDate() != null && !batch.getExpiryDate().isAfter(LocalDate.now())) {
+            throw new IllegalStateException("Cannot release an already-expired batch (" + batch.getExpiryDate() + ") into Available stock.");
+        }
+
         // 1. Update Batch: set status to Available, update units to acceptedUnits
         batch.setStatus(Batch.Status.Available);
+        batch.setSkuDeducted(false);
         batch.setUnits(acceptedUnits);
 
         StringBuilder notesBuilder = new StringBuilder();
@@ -778,7 +860,7 @@ public class BatchService {
     }
 
 
-    // 9. ADD UNITS TO SPECIFIC BATCH (Disallows expired batches)
+    // 9. ADD UNITS TO SPECIFIC BATCH (Disallows expired and quarantined batches)
     @Transactional
     public Batch addUnitsToBatch(Long batchId, Long skuId, long unitsToAdd) {
         if (batchId == null || unitsToAdd <= 0) {
@@ -791,6 +873,10 @@ public class BatchService {
             if (!batch.getOrderedItem().getSku().getId().equals(skuId)) {
                 throw new RuntimeException("Selected batch does not belong to this SKU.");
             }
+        }
+
+        if (batch.getStatus() == Batch.Status.Quarantined) {
+            throw new RuntimeException("Cannot add active stock to a quarantined batch. Please release the batch from quarantine first.");
         }
 
         if (batch.getStatus() == Batch.Status.Expired ||
@@ -819,6 +905,14 @@ public class BatchService {
             }
         }
 
+        if (batch.getStatus() == Batch.Status.Quarantined) {
+            throw new RuntimeException("Cannot deduct active stock from a quarantined batch.");
+        }
+
+        if (batch.getStatus() == Batch.Status.Expired && Boolean.TRUE.equals(batch.getSkuDeducted())) {
+            throw new RuntimeException("Cannot deduct stock from an expired batch that has already been deducted from active SKU inventory.");
+        }
+
         long currentBatchUnits = batch.getUnits() != null ? batch.getUnits() : 0L;
         if (unitsToDeduct > currentBatchUnits) {
             throw new RuntimeException("Cannot deduct " + unitsToDeduct + " units from Batch #" + batch.getBatchNum() +
@@ -838,8 +932,16 @@ public class BatchService {
         return !batchRepository.findBatchesForSkuOrderByReceivedAtAsc(facilityId, skuId).isEmpty();
     }
 
-    // HELPER: ADJUST ACTIVE SKU UNITS (Under Pessimistic Lock)
-    private void adjustSkuUnits(Batch batch, long delta) {
+    // HELPER: ADJUST ACTIVE SKU UNITS & RECORD TRANSACTION (Under Pessimistic Lock)
+    private void adjustSkuUnitsAndRecordTransaction(Batch batch,
+                                                    long delta,
+                                                    InventoryTransaction.Type txType,
+                                                    String referenceNumber,
+                                                    String reason,
+                                                    String notes) {
+        if (delta == 0L) {
+            return;
+        }
         OrderedItem item = batch.getOrderedItem();
         if (item != null && item.getSku() != null) {
             Sku skuRef = item.getSku();
@@ -848,6 +950,24 @@ public class BatchService {
             long newUnits = Math.max(0L, currentUnits + delta);
             sku.setUnits(newUnits);
             skuRepository.save(sku);
+
+            inventoryTransactionService.recordTransaction(
+                    sku,
+                    batch.getFacility(),
+                    batch,
+                    getCurrentUser(),
+                    txType,
+                    referenceNumber,
+                    batch.getBatchNum(),
+                    batch.getExpiryDate(),
+                    delta > 0 ? delta : null,
+                    delta < 0 ? Math.abs(delta) : null,
+                    currentUnits,
+                    newUnits,
+                    reason,
+                    notes,
+                    LocalDateTime.now()
+            );
         }
     }
 

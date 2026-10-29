@@ -719,16 +719,20 @@ public class SkuService {
         long newUnits;
         long unitsToDeduct = 0L;
         Batch targetBatch = null;
+        Long facilityId = sku.getFacility() != null ? sku.getFacility().getId() : null;
+        boolean hasBatches = facilityId != null && batchService.hasBatchesForSku(facilityId, sku.getId());
 
         switch (request.getType()) {
             case ADD:
+                if (hasBatches && request.getBatchId() == null) {
+                    throw new RuntimeException("Target batch is required when adding stock to an SKU with existing batches. Please select which batch to add to.");
+                }
                 newUnits = currentUnits + request.getAmount();
                 if (request.getBatchId() != null) {
                     targetBatch = batchService.addUnitsToBatch(request.getBatchId(), sku.getId(), request.getAmount());
                 }
                 break;
             case SUBTRACT:
-                Long facilityId = sku.getFacility() != null ? sku.getFacility().getId() : null;
                 if (facilityId != null && batchService.hasUnprocessedExpiredBatches(facilityId, sku.getId())) {
                     throw new RuntimeException("This SKU has unprocessed expired batches. Please deduct expired batches first before adjusting stock.");
                 }
@@ -748,6 +752,7 @@ public class SkuService {
         boolean isDispensed = request.getReason() != null && "DISPENSED".equalsIgnoreCase(request.getReason().trim());
 
         List<Batch> deductedBatches = new ArrayList<>();
+        List<BatchService.BatchDeductionDetail> fefoDeductions = new ArrayList<>();
         if (unitsToDeduct > 0 && savedSku.getFacility() != null) {
             if (isDispensed) {
                 // When reason is Dispensed, patient name and contact number are required
@@ -759,9 +764,22 @@ public class SkuService {
                 }
 
                 // FEFO: Deduct automatically from the nearest expiring available batches
-                deductedBatches = batchService.deductBatchesFEFO(savedSku.getId(), savedSku.getFacility().getId(), unitsToDeduct).stream()
+                fefoDeductions = batchService.deductBatchesFEFO(savedSku.getId(), savedSku.getFacility().getId(), unitsToDeduct);
+                long totalDeductedFromBatches = fefoDeductions.stream()
+                        .mapToLong(BatchService.BatchDeductionDetail::getDeductedUnits)
+                        .sum();
+
+                if (hasBatches && totalDeductedFromBatches < unitsToDeduct) {
+                    throw new RuntimeException("Insufficient available unexpired batch stock to dispense " + unitsToDeduct +
+                            " units (only " + totalDeductedFromBatches + " units available across active batches).");
+                }
+
+                deductedBatches = fefoDeductions.stream()
                         .map(BatchService.BatchDeductionDetail::getBatch)
                         .collect(Collectors.toList());
+                if (deductedBatches.size() == 1) {
+                    targetBatch = deductedBatches.get(0);
+                }
 
                 // Create DispensedLog with status PENDING
                 DispensedLog dispensedLog = new DispensedLog();
@@ -773,7 +791,6 @@ public class SkuService {
                 dispensedLogRepository.save(dispensedLog);
             } else {
                 // When reason is other than Dispensed, require and deduct from the specific target batch
-                boolean hasBatches = batchService.hasBatchesForSku(savedSku.getFacility().getId(), savedSku.getId());
                 if (hasBatches && request.getBatchId() == null) {
                     throw new RuntimeException("Target batch is required when adjustment reason is not 'Dispensed'. Please select which batch to deduct from.");
                 }
@@ -827,23 +844,58 @@ public class SkuService {
             txType = InventoryTransaction.Type.ADJUSTMENT_SUB;
         }
 
-        inventoryTransactionService.recordTransaction(
-                savedSku,
-                savedSku.getFacility(),
-                targetBatch,
-                getCurrentUser(),
-                txType,
-                "ADJ-" + System.currentTimeMillis(),
-                targetBatch != null ? targetBatch.getBatchNum() : null,
-                targetBatch != null ? targetBatch.getExpiryDate() : null,
-                request.getType() == SkuStockAdjustmentDto.Type.ADD ? request.getAmount() : null,
-                request.getType() == SkuStockAdjustmentDto.Type.SUBTRACT ? request.getAmount() : null,
-                currentUnits,
-                newUnits,
-                request.getReason(),
-                logNotes,
-                java.time.LocalDateTime.now()
-        );
+        String refNum = "ADJ-" + System.currentTimeMillis();
+        User currentUser = getCurrentUser();
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+
+        if (isDispensed && fefoDeductions.size() > 1) {
+            long runningBalance = currentUnits;
+            int secOffset = 0;
+            for (BatchService.BatchDeductionDetail detail : fefoDeductions) {
+                long deducted = detail.getDeductedUnits();
+                if (deducted <= 0) {
+                    continue;
+                }
+                Batch b = detail.getBatch();
+                long balanceAfterBatch = runningBalance - deducted;
+                inventoryTransactionService.recordTransaction(
+                        savedSku,
+                        savedSku.getFacility(),
+                        b,
+                        currentUser,
+                        txType,
+                        refNum,
+                        b.getBatchNum(),
+                        b.getExpiryDate(),
+                        null,
+                        deducted,
+                        runningBalance,
+                        balanceAfterBatch,
+                        request.getReason(),
+                        logNotes,
+                        now.plusSeconds(secOffset++)
+                );
+                runningBalance = balanceAfterBatch;
+            }
+        } else {
+            inventoryTransactionService.recordTransaction(
+                    savedSku,
+                    savedSku.getFacility(),
+                    targetBatch,
+                    currentUser,
+                    txType,
+                    refNum,
+                    targetBatch != null ? targetBatch.getBatchNum() : null,
+                    targetBatch != null ? targetBatch.getExpiryDate() : null,
+                    request.getType() == SkuStockAdjustmentDto.Type.ADD ? request.getAmount() : null,
+                    request.getType() == SkuStockAdjustmentDto.Type.SUBTRACT ? request.getAmount() : null,
+                    currentUnits,
+                    newUnits,
+                    request.getReason(),
+                    logNotes,
+                    now
+            );
+        }
 
         // Record central Audit Log entry
         long delta = newUnits - currentUnits;
