@@ -16,8 +16,8 @@ import java.util.List;
 @AllArgsConstructor
 public class OrderRequestDto {
 
-    @NotNull(message = "Facility ID is required")
-    private Long facilityId;
+    @NotNull(message = "Pharmacy ID is required")
+    private Long pharmacyId;
 
     @NotNull(message = "Supplier ID is required")
     private Long supplierId;

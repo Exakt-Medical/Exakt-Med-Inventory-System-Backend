@@ -20,14 +20,17 @@ public interface OrderedItemRepository extends JpaRepository<OrderedItem, Long> 
     List<OrderedItem> findByOrderIdInWithSku(@Param("orderIds") List<Long> orderIds);
 
     @Query("SELECT oi FROM OrderedItem oi JOIN oi.order o WHERE " +
-           "o.facility.id = :facilityId AND " +
+           "o.pharmacy.id = :pharmacyId AND " +
            "o.status IN (com.example.backend.entity.Order.Status.Pending, com.example.backend.entity.Order.Status.Approved, com.example.backend.entity.Order.Status.Partially_Received)")
-    List<OrderedItem> findActiveOrderedItemsByFacilityId(@Param("facilityId") Long facilityId);
+    List<OrderedItem> findActiveOrderedItemsByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     @Query("SELECT oi FROM OrderedItem oi JOIN oi.order o WHERE " +
-           "o.facility.id = :facilityId AND oi.sku.id = :skuId AND " +
+           "o.pharmacy.id = :pharmacyId AND " +
+           "oi.sku.id = :skuId AND " +
            "o.status IN (com.example.backend.entity.Order.Status.Pending, com.example.backend.entity.Order.Status.Approved, com.example.backend.entity.Order.Status.Partially_Received)")
-    List<OrderedItem> findActiveOrderedItemsByFacilityIdAndSkuId(@Param("facilityId") Long facilityId, @Param("skuId") Long skuId);
+    List<OrderedItem> findActiveOrderedItemsByPharmacyIdAndSkuId(
+            @Param("pharmacyId") Long pharmacyId,
+            @Param("skuId") Long skuId);
 
     @Query("SELECT oi FROM OrderedItem oi JOIN oi.order o WHERE " +
            "o.status IN (com.example.backend.entity.Order.Status.Pending, com.example.backend.entity.Order.Status.Approved, com.example.backend.entity.Order.Status.Partially_Received)")

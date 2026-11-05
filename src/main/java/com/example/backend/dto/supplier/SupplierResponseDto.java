@@ -17,6 +17,8 @@ public class SupplierResponseDto {
     private Long id;
     private Long facilityId;
     private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private String name;
     private String contactPerson;
     private String email;

@@ -3,24 +3,24 @@ package com.example.backend.service;
 import com.example.backend.dto.batch.BatchReleaseRequestDto;
 import com.example.backend.dto.batch.BatchRequestDto;
 import com.example.backend.dto.batch.BatchResponseDto;
+import com.example.backend.dto.batch.BatchSummaryDto;
+import com.example.backend.dto.common.PageResponseDto;
+import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Batch;
-import com.example.backend.entity.Facility;
 import com.example.backend.entity.InventoryTransaction;
+import com.example.backend.entity.LibLocation;
 import com.example.backend.entity.Order;
 import com.example.backend.entity.OrderedItem;
+import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.Sku;
-import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.User;
 import com.example.backend.repository.BatchRepository;
-import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.LibLocationRepository;
 import com.example.backend.repository.OrderRepository;
 import com.example.backend.repository.OrderedItemRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.UserRepository;
-import com.example.backend.repository.LibLocationRepository;
-import com.example.backend.entity.LibLocation;
-import com.example.backend.dto.common.PageResponseDto;
-import com.example.backend.dto.batch.BatchSummaryDto;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -40,7 +40,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,7 +48,7 @@ public class BatchService {
     private final BatchRepository batchRepository;
     private final OrderedItemRepository orderedItemRepository;
     private final SkuRepository skuRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final OrderRepository orderRepository;
     private final AuditLogService auditLogService;
     private final InventoryTransactionService inventoryTransactionService;
@@ -60,7 +59,7 @@ public class BatchService {
     public BatchService(BatchRepository batchRepository,
                         OrderedItemRepository orderedItemRepository,
                         SkuRepository skuRepository,
-                        FacilityRepository facilityRepository,
+                        PharmacyRepository pharmacyRepository,
                         OrderRepository orderRepository,
                         AuditLogService auditLogService,
                         InventoryTransactionService inventoryTransactionService,
@@ -70,7 +69,7 @@ public class BatchService {
         this.batchRepository = batchRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.skuRepository = skuRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.orderRepository = orderRepository;
         this.auditLogService = auditLogService;
         this.inventoryTransactionService = inventoryTransactionService;
@@ -94,29 +93,29 @@ public class BatchService {
         OrderedItem orderedItem = orderedItemRepository.findById(request.getOrderedItemId())
                 .orElseThrow(() -> new RuntimeException("Ordered item not found with id: " + request.getOrderedItemId()));
 
-        Facility facility = null;
-        if (request.getFacilityId() != null) {
-            facility = facilityRepository.findById(request.getFacilityId())
-                    .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
-        } else if (orderedItem.getOrder() != null && orderedItem.getOrder().getFacility() != null) {
-            facility = orderedItem.getOrder().getFacility();
-        } else if (orderedItem.getSku() != null && orderedItem.getSku().getFacility() != null) {
-            facility = orderedItem.getSku().getFacility();
+        Pharmacy pharmacy = null;
+        if (request.getPharmacyId() != null) {
+            pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                    .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
+        } else if (orderedItem.getOrder() != null && orderedItem.getOrder().getPharmacy() != null) {
+            pharmacy = orderedItem.getOrder().getPharmacy();
+        } else if (orderedItem.getSku() != null && orderedItem.getSku().getPharmacy() != null) {
+            pharmacy = orderedItem.getSku().getPharmacy();
         }
 
-        if (facility == null) {
-            throw new RuntimeException("Facility is required for receiving batch.");
+        if (pharmacy == null) {
+            throw new RuntimeException("Pharmacy is required for receiving batch.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facility.getId());
+        facilityAccessGuard.verifyPharmacyAccess(pharmacy.getId());
 
         String trimmedBatchNum = request.getBatchNum() != null ? request.getBatchNum().trim() : "";
         if (trimmedBatchNum.isEmpty()) {
             throw new RuntimeException("Batch number is required.");
         }
 
-        if (batchRepository.existsByBatchNumAndFacilityId(trimmedBatchNum, facility.getId())) {
-            throw new RuntimeException("Batch number '" + trimmedBatchNum + "' already exists in this facility.");
+        if (batchRepository.existsByBatchNumAndPharmacyId(trimmedBatchNum, pharmacy.getId())) {
+            throw new RuntimeException("Batch number '" + trimmedBatchNum + "' already exists in this pharmacy.");
         }
 
         if (request.getManufactureDate() == null) {
@@ -142,8 +141,8 @@ public class BatchService {
             throw new RuntimeException("Storage location '" + location.getCode() + "' is inactive and cannot accept new batches.");
         }
 
-        if (location.getFacility() != null && !location.getFacility().getId().equals(facility.getId())) {
-            throw new RuntimeException("Storage location '" + location.getCode() + "' belongs to another facility.");
+        if (location.getPharmacy() != null && !location.getPharmacy().getId().equals(pharmacy.getId())) {
+            throw new RuntimeException("Storage location '" + location.getCode() + "' belongs to another pharmacy.");
         }
 
         Batch.Status initialStatus = request.getStatus() != null ? request.getStatus() : Batch.Status.Available;
@@ -152,7 +151,7 @@ public class BatchService {
         }
 
         Batch batch = new Batch();
-        batch.setFacility(facility);
+        batch.setPharmacy(pharmacy);
         batch.setOrderedItem(orderedItem);
         batch.setLocation(location);
         batch.setBatchNum(trimmedBatchNum);
@@ -191,7 +190,7 @@ public class BatchService {
 
                 inventoryTransactionService.recordTransaction(
                         sku,
-                        savedBatch.getFacility(),
+                        savedBatch.getPharmacy(),
                         savedBatch,
                         getCurrentUser(),
                         InventoryTransaction.Type.RECEIPT,
@@ -204,7 +203,7 @@ public class BatchService {
                         currentUnits + unitsToAdd,
                         "PO Stock Received" + poSupplier,
                         savedBatch.getNotes(),
-                        savedBatch.getReceivedAt() != null ? savedBatch.getReceivedAt() : java.time.LocalDateTime.now()
+                        savedBatch.getReceivedAt() != null ? savedBatch.getReceivedAt() : LocalDateTime.now()
                 );
             }
         }
@@ -220,7 +219,7 @@ public class BatchService {
         }
 
         auditLogService.logAction(
-                savedBatch.getFacility(),
+                savedBatch.getPharmacy(),
                 "Inventory",
                 "BATCH_RECEIVED",
                 "Batch Stock Received (" + savedBatch.getUnits() + " units)",
@@ -253,7 +252,7 @@ public class BatchService {
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist', 'Procurement')")
     public PageResponseDto<BatchResponseDto> getBatchesPaginated(
-            Long facilityId,
+            Long pharmacyId,
             String search,
             String status,
             String sku,
@@ -263,11 +262,11 @@ public class BatchService {
             String sortBy,
             String sortDir) {
 
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is required.");
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is required.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         int pageIndex = Math.max(0, page);
         int pageSize = size > 0 ? size : 10;
@@ -293,7 +292,7 @@ public class BatchService {
         String trimmedExpiry = (expiryFilter != null && !expiryFilter.trim().isEmpty()) ? expiryFilter.trim() : null;
 
         Page<Batch> batchPage = batchRepository.findBatchesPaginated(
-                facilityId,
+                pharmacyId,
                 trimmedSearch,
                 trimmedStatus,
                 trimmedSku,
@@ -309,19 +308,19 @@ public class BatchService {
     // 3c. GET BATCH SUMMARY KPIS
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist', 'Procurement')")
-    public BatchSummaryDto getBatchSummary(Long facilityId) {
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is required.");
+    public BatchSummaryDto getBatchSummary(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is required.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         LocalDate nearExpiryDate = LocalDate.now().plusDays(90);
 
-        long totalBatches = batchRepository.countByFacilityId(facilityId);
-        long totalActiveStock = batchRepository.sumActiveStockByFacilityId(facilityId);
-        long expiryAlertCount = batchRepository.countExpiryAlertsByFacilityId(facilityId, nearExpiryDate);
-        long quarantinedCount = batchRepository.countQuarantinedByFacilityId(facilityId);
+        long totalBatches = batchRepository.countByPharmacyId(pharmacyId);
+        long totalActiveStock = batchRepository.sumActiveStockByPharmacyId(pharmacyId);
+        long expiryAlertCount = batchRepository.countExpiryAlertsByPharmacyId(pharmacyId, nearExpiryDate);
+        long quarantinedCount = batchRepository.countQuarantinedByPharmacyId(pharmacyId);
 
         return BatchSummaryDto.builder()
                 .totalBatches(totalBatches)
@@ -334,35 +333,35 @@ public class BatchService {
     // 3d. GET DISTINCT SKUS IN BATCHES
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist', 'Procurement')")
-    public List<String> getDistinctBatchSkus(Long facilityId) {
-        if (facilityId == null) {
+    public List<String> getDistinctBatchSkus(Long pharmacyId) {
+        if (pharmacyId == null) {
             return Collections.emptyList();
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        return batchRepository.findDistinctSkuNamesByFacilityId(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        return batchRepository.findDistinctSkuNamesByPharmacyId(pharmacyId);
     }
 
     // 3e. GET BATCHES BY SKU (Targeted retrieval for modal adjustments & expired deductions)
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist', 'Procurement')")
-    public List<BatchResponseDto> getBatchesBySku(Long facilityId, Long skuId) {
-        if (facilityId == null || skuId == null) {
+    public List<BatchResponseDto> getBatchesBySku(Long pharmacyId, Long skuId) {
+        if (pharmacyId == null || skuId == null) {
             return Collections.emptyList();
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        return batchRepository.findBatchesForSkuOrderByReceivedAtAsc(facilityId, skuId)
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        return batchRepository.findBatchesForSkuOrderByReceivedAtAsc(pharmacyId, skuId)
                 .stream()
                 .map(this::mapToResponseDto)
                 .collect(Collectors.toList());
     }
 
-    // 3f. GET AGGREGATED EXPIRED BATCH METRICS PER SKU FOR A FACILITY
+    // 3f. GET AGGREGATED EXPIRED BATCH METRICS PER SKU FOR A PHARMACY
     @Transactional(readOnly = true)
-    public Map<Long, long[]> getExpiredBatchMetrics(Long facilityId) {
-        if (facilityId == null) {
+    public Map<Long, long[]> getExpiredBatchMetrics(Long pharmacyId) {
+        if (pharmacyId == null) {
             return Collections.emptyMap();
         }
-        List<Object[]> rows = batchRepository.findExpiredBatchMetricsByFacilityId(facilityId, LocalDate.now());
+        List<Object[]> rows = batchRepository.findExpiredBatchMetricsByPharmacyId(pharmacyId, LocalDate.now());
         Map<Long, long[]> result = new HashMap<>();
         for (Object[] row : rows) {
             Long skuId = (Long) row[0];
@@ -375,15 +374,14 @@ public class BatchService {
         return result;
     }
 
-
     // 4. GET BATCH BY ID
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist', 'Procurement')")
     public BatchResponseDto getBatchById(Long id) {
         Batch batch = batchRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Batch not found with id: " + id));
-        if (batch.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        if (batch.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(batch.getPharmacy().getId());
         }
         return mapToResponseDto(batch);
     }
@@ -395,8 +393,8 @@ public class BatchService {
         Batch batch = batchRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("Batch not found with id: " + id));
 
-        if (batch.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        if (batch.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(batch.getPharmacy().getId());
         }
 
         Batch.Status oldStatus = batch.getStatus();
@@ -495,7 +493,7 @@ public class BatchService {
         Batch updated = batchRepository.save(batch);
 
         auditLogService.logAction(
-                updated.getFacility(),
+                updated.getPharmacy(),
                 "Inventory",
                 "BATCH_STATUS_UPDATED",
                 "Batch Status Changed (" + oldStatus + " -> " + status + ")",
@@ -523,8 +521,8 @@ public class BatchService {
         Batch batch = batchRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("Batch not found with id: " + id));
 
-        if (batch.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        if (batch.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(batch.getPharmacy().getId());
         }
 
         if (batch.getStatus() != Batch.Status.Quarantined) {
@@ -593,7 +591,7 @@ public class BatchService {
 
                 inventoryTransactionService.recordTransaction(
                         sku,
-                        savedBatch.getFacility(),
+                        savedBatch.getPharmacy(),
                         savedBatch,
                         currentUser,
                         InventoryTransaction.Type.QUARANTINE_RELEASE,
@@ -617,7 +615,7 @@ public class BatchService {
 
                 inventoryTransactionService.recordTransaction(
                         sku,
-                        savedBatch.getFacility(),
+                        savedBatch.getPharmacy(),
                         savedBatch,
                         currentUser,
                         InventoryTransaction.Type.ADJUSTMENT_SUB,
@@ -636,7 +634,7 @@ public class BatchService {
                 // Fully accepted batch
                 inventoryTransactionService.recordTransaction(
                         sku,
-                        savedBatch.getFacility(),
+                        savedBatch.getPharmacy(),
                         savedBatch,
                         currentUser,
                         InventoryTransaction.Type.QUARANTINE_RELEASE,
@@ -673,7 +671,7 @@ public class BatchService {
                 (request.getNotes() != null && !request.getNotes().isBlank()) ? " Comments: " + request.getNotes().trim() : "");
 
         auditLogService.logAction(
-                savedBatch.getFacility(),
+                savedBatch.getPharmacy(),
                 currentUser,
                 "Inventory",
                 "BATCH_RELEASED",
@@ -690,12 +688,12 @@ public class BatchService {
 
     // 5c. MARK PAST-DUE BATCHES AS EXPIRED (Status change only, no SKU deduction)
     @Transactional
-    public void markPastDueBatchesAsExpired(Long facilityId) {
+    public void markPastDueBatchesAsExpired(Long pharmacyId) {
         LocalDate today = LocalDate.now();
         List<Batch> pastDue;
-        if (facilityId != null) {
-            pastDue = batchRepository.findByFacilityIdAndStatusAndExpiryDateLessThanEqual(
-                    facilityId, Batch.Status.Available, today);
+        if (pharmacyId != null) {
+            pastDue = batchRepository.findByPharmacyIdAndStatusAndExpiryDateLessThanEqual(
+                    pharmacyId, Batch.Status.Available, today);
         } else {
             pastDue = batchRepository.findByStatusAndExpiryDateLessThanEqual(
                     Batch.Status.Available, today);
@@ -720,19 +718,18 @@ public class BatchService {
 
     // 6. PROCESS EXPIRED BATCHES FOR A SKU (Deducts active SKU units & keeps batch units intact)
     @Transactional
-    public int processExpiredBatches(Long facilityId, Long skuId) {
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is required to process expired batches.");
+    public int processExpiredBatches(Long pharmacyId, Long skuId) {
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is required to process expired batches.");
         }
         if (skuId == null) {
             throw new IllegalArgumentException("SKU ID is required to process expired batches.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         LocalDate today = LocalDate.now();
-        List<Batch> expiredBatches = batchRepository.findExpiredBatches(
-                facilityId, skuId, today);
+        List<Batch> expiredBatches = batchRepository.findExpiredBatches(pharmacyId, skuId, today);
 
         for (Batch batch : expiredBatches) {
             long batchUnits = batch.getUnits() != null ? batch.getUnits() : 0L;
@@ -751,7 +748,7 @@ public class BatchService {
                 if (s != null) {
                     inventoryTransactionService.recordTransaction(
                             s,
-                            batch.getFacility(),
+                            batch.getPharmacy(),
                             batch,
                             null,
                             InventoryTransaction.Type.EXPIRY_DEDUCTION,
@@ -764,7 +761,7 @@ public class BatchService {
                             newUnits,
                             "Expired stock write-off",
                             batch.getNotes(),
-                            java.time.LocalDateTime.now()
+                            LocalDateTime.now()
                     );
                 }
             }
@@ -778,8 +775,8 @@ public class BatchService {
             batchRepository.save(batch);
 
             auditLogService.logAction(
-                    batch.getFacility(),
-                    null,
+                    batch.getPharmacy(),
+                    (User) null,
                     "Inventory",
                     "BATCH_EXPIRED",
                     "Batch Expired (" + batch.getBatchNum() + ")",
@@ -795,11 +792,11 @@ public class BatchService {
 
     // 7. CHECK IF SKU HAS UNPROCESSED EXPIRED BATCHES
     @Transactional(readOnly = true)
-    public boolean hasUnprocessedExpiredBatches(Long facilityId, Long skuId) {
-        if (facilityId == null || skuId == null) {
+    public boolean hasUnprocessedExpiredBatches(Long pharmacyId, Long skuId) {
+        if (pharmacyId == null || skuId == null) {
             return false;
         }
-        return !batchRepository.findExpiredBatches(facilityId, skuId, LocalDate.now()).isEmpty();
+        return !batchRepository.findExpiredBatches(pharmacyId, skuId, LocalDate.now()).isEmpty();
     }
 
     // 8. DEDUCT BATCHES ACCORDING TO FEFO (FIRST EXPIRE FIRST OUT - AVAILABLE & UNEXPIRED ONLY)
@@ -822,16 +819,16 @@ public class BatchService {
     }
 
     @Transactional
-    public List<BatchDeductionDetail> deductBatchesFEFO(Long skuId, Long facilityId, long unitsToDeduct) {
+    public List<BatchDeductionDetail> deductBatchesFEFO(Long skuId, Long pharmacyId, long unitsToDeduct) {
         List<BatchDeductionDetail> details = new ArrayList<>();
-        if (unitsToDeduct <= 0 || skuId == null || facilityId == null) {
+        if (unitsToDeduct <= 0 || skuId == null || pharmacyId == null) {
             return details;
         }
 
         LocalDate today = LocalDate.now();
         // Uses PESSIMISTIC_WRITE lock in BatchRepository.findAvailableBatchesForSkuFEFO
         List<Batch> availableBatches = batchRepository.findAvailableBatchesForSkuFEFO(
-                skuId, facilityId, Batch.Status.Available, today);
+                skuId, pharmacyId, Batch.Status.Available, today);
 
         long remaining = unitsToDeduct;
         for (Batch batch : availableBatches) {
@@ -858,7 +855,6 @@ public class BatchService {
         }
         return details;
     }
-
 
     // 9. ADD UNITS TO SPECIFIC BATCH (Disallows expired and quarantined batches)
     @Transactional
@@ -923,13 +919,13 @@ public class BatchService {
         return batchRepository.save(batch);
     }
 
-    // 11. CHECK IF FACILITY HAS BATCHES FOR SKU
+    // 11. CHECK IF PHARMACY HAS BATCHES FOR SKU
     @Transactional(readOnly = true)
-    public boolean hasBatchesForSku(Long facilityId, Long skuId) {
-        if (facilityId == null || skuId == null) {
+    public boolean hasBatchesForSku(Long pharmacyId, Long skuId) {
+        if (pharmacyId == null || skuId == null) {
             return false;
         }
-        return !batchRepository.findBatchesForSkuOrderByReceivedAtAsc(facilityId, skuId).isEmpty();
+        return !batchRepository.findBatchesForSkuOrderByReceivedAtAsc(pharmacyId, skuId).isEmpty();
     }
 
     // HELPER: ADJUST ACTIVE SKU UNITS & RECORD TRANSACTION (Under Pessimistic Lock)
@@ -953,7 +949,7 @@ public class BatchService {
 
             inventoryTransactionService.recordTransaction(
                     sku,
-                    batch.getFacility(),
+                    batch.getPharmacy(),
                     batch,
                     getCurrentUser(),
                     txType,
@@ -983,9 +979,9 @@ public class BatchService {
         dto.setNotes(batch.getNotes());
         dto.setReceivedAt(batch.getReceivedAt());
 
-        if (batch.getFacility() != null) {
-            dto.setFacilityId(batch.getFacility().getId());
-            dto.setFacilityName(batch.getFacility().getName());
+        if (batch.getPharmacy() != null) {
+            dto.setPharmacyId(batch.getPharmacy().getId());
+            dto.setPharmacyName(batch.getPharmacy().getPharmacyName());
         }
 
         OrderedItem item = batch.getOrderedItem();
@@ -1031,17 +1027,17 @@ public class BatchService {
         Batch batch = batchRepository.findById(batchId)
                 .orElseThrow(() -> new RuntimeException("Batch not found with ID: " + batchId));
 
-        if (batch.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(batch.getFacility().getId());
+        if (batch.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(batch.getPharmacy().getId());
         }
 
         LibLocation location = null;
         if (locationId != null) {
             location = libLocationRepository.findById(locationId)
                     .orElseThrow(() -> new RuntimeException("Storage location not found with ID: " + locationId));
-            if (location.getFacility() != null && batch.getFacility() != null &&
-                    !location.getFacility().getId().equals(batch.getFacility().getId())) {
-                throw new RuntimeException("Storage location belongs to another facility.");
+            if (location.getPharmacy() != null && batch.getPharmacy() != null &&
+                    !location.getPharmacy().getId().equals(batch.getPharmacy().getId())) {
+                throw new RuntimeException("Storage location belongs to another pharmacy.");
             }
         }
 
@@ -1049,7 +1045,7 @@ public class BatchService {
         Batch updated = batchRepository.save(batch);
 
         auditLogService.logAction(
-                updated.getFacility(),
+                updated.getPharmacy(),
                 "Inventory",
                 "BATCH_RELOCATED",
                 "Batch Storage Location Updated",
@@ -1086,7 +1082,7 @@ public class BatchService {
             Order savedOrder = orderRepository.save(order);
 
             auditLogService.logAction(
-                    savedOrder.getFacility(),
+                    savedOrder.getPharmacy(),
                     "Purchasing",
                     "ORDER_STATUS_UPDATED",
                     "Order Status Updated (" + oldStatus + " -> " + newStatus + ")",

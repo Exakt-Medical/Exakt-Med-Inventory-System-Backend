@@ -15,7 +15,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/assign/facilities")
-@Tag(name = "Facility Assignments", description = "Endpoints for assigning users (Pharmacists, Procurement Officers) to facilities and querying assigned scopes")
+@Tag(name = "Facility Assignments", description = "Endpoints for assigning users (Admin, Pharmacists, Procurement Officers) to facilities and querying assigned scopes")
 public class FacilityAssignController {
 
     private final FacilityAssignService facilityAssignService;

@@ -14,16 +14,24 @@ import java.util.Optional;
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findAllByOrderByCreatedAtDesc();
-    List<Order> findByFacilityIdOrderByCreatedAtDesc(Long facilityId);
-    List<Order> findByFacilityIdAndStatusOrderByCreatedAtDesc(Long facilityId, Order.Status status);
-    List<Order> findByFacilityIdAndStatusInOrderByCreatedAtDesc(Long facilityId, List<Order.Status> statuses);
-    List<Order> findByFacilityId(Long facilityId);
+    List<Order> findByPharmacyIdOrderByCreatedAtDesc(Long pharmacyId);
+    List<Order> findByPharmacyIdAndStatusOrderByCreatedAtDesc(Long pharmacyId, Order.Status status);
+    List<Order> findByPharmacyIdAndStatusInOrderByCreatedAtDesc(Long pharmacyId, List<Order.Status> statuses);
+    List<Order> findByPharmacyId(Long pharmacyId);
     Optional<Order> findByPurchaseOrderNum(String purchaseOrderNum);
     List<Order> findBySupplierId(Long supplierId);
 
+    @Query("SELECT o FROM Order o WHERE " +
+           "o.pharmacy.id = :pharmacyId AND " +
+           "o.status IN :statuses " +
+           "ORDER BY o.createdAt DESC")
+    List<Order> findReceivableOrdersByPharmacyId(
+            @Param("pharmacyId") Long pharmacyId,
+            @Param("statuses") List<Order.Status> statuses);
+
     @Query(value = "SELECT o FROM Order o " +
            "LEFT JOIN o.supplier s " +
-           "WHERE o.facility.id = :facilityId " +
+           "WHERE o.pharmacy.id = :pharmacyId " +
            "AND (:statuses IS NULL OR o.status IN :statuses) " +
            "AND (:priority IS NULL OR :priority = '' OR :priority = 'ALL' OR LOWER(o.priority) = LOWER(:priority)) " +
            "AND (:search IS NULL OR :search = '' OR " +
@@ -43,7 +51,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            ")",
            countQuery = "SELECT COUNT(o) FROM Order o " +
            "LEFT JOIN o.supplier s " +
-           "WHERE o.facility.id = :facilityId " +
+           "WHERE o.pharmacy.id = :pharmacyId " +
            "AND (:statuses IS NULL OR o.status IN :statuses) " +
            "AND (:priority IS NULL OR :priority = '' OR :priority = 'ALL' OR LOWER(o.priority) = LOWER(:priority)) " +
            "AND (:search IS NULL OR :search = '' OR " +
@@ -62,12 +70,14 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            "     ) " +
            ")")
     Page<Order> findOrdersPaginated(
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("statuses") List<Order.Status> statuses,
             @Param("priority") String priority,
             @Param("search") String search,
             Pageable pageable);
 
-    @Query("SELECT LOWER(o.status), COUNT(o) FROM Order o WHERE o.facility.id = :facilityId GROUP BY LOWER(o.status)")
-    List<Object[]> countOrdersByStatus(@Param("facilityId") Long facilityId);
+    @Query("SELECT LOWER(o.status), COUNT(o) FROM Order o WHERE " +
+           "o.pharmacy.id = :pharmacyId " +
+           "GROUP BY LOWER(o.status)")
+    List<Object[]> countOrdersByStatus(@Param("pharmacyId") Long pharmacyId);
 }

@@ -16,8 +16,8 @@ public class AuditLogResponseDto {
 
     private Long id;
     private String logCode;
-    private Long facilityId;
-    private String facility;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Long userId;
     private String userName;
     private String userRole;

@@ -25,6 +25,9 @@ public class OneRxBrandResponseDto {
     @JsonProperty("drug_name")
     private String drugName;
 
+    @JsonProperty("pharmacy_code")
+    private String pharmacyCode;
+
     @JsonProperty("facility_code")
     private String facilityCode;
 

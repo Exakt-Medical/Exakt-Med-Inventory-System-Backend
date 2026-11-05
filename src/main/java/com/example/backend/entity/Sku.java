@@ -12,12 +12,12 @@ import java.time.LocalDateTime;
 @Table(
     name = "sku",
     uniqueConstraints = {
-        @UniqueConstraint(name = "uk_facility_sku_name", columnNames = {"facilityId", "name"})
+        @UniqueConstraint(name = "uk_pharmacy_sku_name", columnNames = {"pharmacyId", "name"})
     },
     indexes = {
-        @Index(name = "idx_sku_facility_brand", columnList = "facilityId, brandName"),
-        @Index(name = "idx_sku_facility_units", columnList = "facilityId, units"),
-        @Index(name = "idx_sku_facility_name", columnList = "facilityId, name")
+        @Index(name = "idx_sku_pharmacy_brand", columnList = "pharmacyId, brandName"),
+        @Index(name = "idx_sku_pharmacy_units", columnList = "pharmacyId, units"),
+        @Index(name = "idx_sku_pharmacy_name", columnList = "pharmacyId, name")
     }
 )
 @Getter
@@ -31,8 +31,8 @@ public class Sku {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "facilityId")
-    private Facility facility;
+    @JoinColumn(name = "pharmacyId", nullable = false)
+    private Pharmacy pharmacy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "medicineId")

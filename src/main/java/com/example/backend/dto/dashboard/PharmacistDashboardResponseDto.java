@@ -17,6 +17,8 @@ public class PharmacistDashboardResponseDto {
 
     private Long facilityId;
     private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Metrics metrics;
     private List<CategoryStockDistribution> skuStockDistribution;
     private List<CategoryHealthBar> skuHealthBarData;

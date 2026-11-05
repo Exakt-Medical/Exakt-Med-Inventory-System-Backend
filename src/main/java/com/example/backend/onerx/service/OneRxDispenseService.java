@@ -2,13 +2,14 @@ package com.example.backend.onerx.service;
 
 import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Facility;
+import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.InventoryTransaction;
 import com.example.backend.entity.Sku;
 import com.example.backend.entity.User;
 import com.example.backend.onerx.dto.OneRxDispenseRequestDto;
 import com.example.backend.onerx.dto.OneRxDispenseResponseDto;
 import com.example.backend.repository.BatchRepository;
-import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.UserRepository;
@@ -40,7 +41,7 @@ public class OneRxDispenseService {
 
     private final SkuRepository skuRepository;
     private final BatchRepository batchRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final BatchService batchService;
     private final InventoryTransactionService inventoryTransactionService;
     private final InventoryTransactionRepository inventoryTransactionRepository;
@@ -50,7 +51,7 @@ public class OneRxDispenseService {
 
     public OneRxDispenseService(SkuRepository skuRepository,
                                 BatchRepository batchRepository,
-                                FacilityRepository facilityRepository,
+                                PharmacyRepository pharmacyRepository,
                                 BatchService batchService,
                                 InventoryTransactionService inventoryTransactionService,
                                 InventoryTransactionRepository inventoryTransactionRepository,
@@ -59,7 +60,7 @@ public class OneRxDispenseService {
                                 FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.batchRepository = batchRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.batchService = batchService;
         this.inventoryTransactionService = inventoryTransactionService;
         this.inventoryTransactionRepository = inventoryTransactionRepository;
@@ -88,22 +89,24 @@ public class OneRxDispenseService {
         }
         String refNumber = rxNumber.trim();
 
-        String facilityCode = request.getFacilityCode();
-        if (facilityCode == null || facilityCode.trim().isBlank()) {
-            throw new IllegalArgumentException("Field 'facility_code' is required in the request body.");
+        String pharmacyCode = request.getPharmacyCode();
+        if (pharmacyCode == null || pharmacyCode.trim().isBlank()) {
+            throw new IllegalArgumentException("Field 'pharmacy_code' is required in the request body.");
         }
 
-        Facility facility = resolveFacility(facilityCode.trim())
-                .orElseThrow(() -> new IllegalArgumentException("Facility not found with code: " + facilityCode));
+        Pharmacy pharmacy = resolvePharmacy(pharmacyCode.trim())
+                .orElseThrow(() -> new IllegalArgumentException("Pharmacy not found with code: " + pharmacyCode));
 
-        // Enforce facility access if called by a regular user token
-        facilityAccessGuard.verifyFacilityAccess(facility.getId());
+        Facility facility = pharmacy.getFacility();
 
-        // Idempotency guard: Prevent duplicate dispense for the same rx_number in this facility
-        if (inventoryTransactionRepository.existsByFacilityIdAndTransactionTypeAndReferenceNumberIgnoreCase(
-                facility.getId(), InventoryTransaction.Type.DISPENSE, refNumber)) {
+        // Enforce pharmacy access if called by a regular user token
+        facilityAccessGuard.verifyPharmacyAccess(pharmacy.getId());
+
+        // Idempotency guard: Prevent duplicate dispense for the same rx_number in this pharmacy
+        if (inventoryTransactionRepository.existsByPharmacyIdAndTransactionTypeAndReferenceNumberIgnoreCase(
+                pharmacy.getId(), InventoryTransaction.Type.DISPENSE, refNumber)) {
             throw new IllegalArgumentException(
-                    "Duplicate rx_number: Prescription '" + refNumber + "' has already been dispensed in facility '" + facility.getName() + "'.");
+                    "Duplicate rx_number: Prescription '" + refNumber + "' has already been dispensed in pharmacy '" + pharmacy.getPharmacyName() + "'.");
         }
 
         if (request.getMedicines() == null || request.getMedicines().isEmpty()) {
@@ -148,14 +151,14 @@ public class OneRxDispenseService {
         Map<String, Sku> lockedSkusByName = new HashMap<>();
         Map<Long, Long> effectiveAvailableBySkuId = new HashMap<>();
         for (String name : sortedSkuNames) {
-            Sku lockedSku = skuRepository.findByFacilityIdAndNameForUpdate(facility.getId(), name)
+            Sku lockedSku = skuRepository.findByPharmacyIdAndNameForUpdate(pharmacy.getId(), name)
                     .orElseThrow(() -> new IllegalArgumentException(
-                            String.format("SKU '%s' not found for facility '%s'.", name, facility.getName())));
+                            String.format("SKU '%s' not found for pharmacy '%s'.", name, pharmacy.getPharmacyName())));
             lockedSkusByName.put(name.toUpperCase(), lockedSku);
 
             long rawUnits = lockedSku.getUnits() != null ? lockedSku.getUnits() : 0L;
             long undeductedExpiredUnits = batchRepository.sumUndeductedExpiredUnitsForSku(
-                    facility.getId(),
+                    pharmacy.getId(),
                     lockedSku.getId(),
                     today
             );
@@ -225,7 +228,7 @@ public class OneRxDispenseService {
             // 1. FEFO Batch Deduction (locks candidate batches with PESSIMISTIC_WRITE)
             List<BatchService.BatchDeductionDetail> deductions = batchService.deductBatchesFEFO(
                     sku.getId(),
-                    facility.getId(),
+                    pharmacy.getId(),
                     unitsToDispense
             );
 
@@ -246,6 +249,7 @@ public class OneRxDispenseService {
                     inventoryTransactionService.recordTransaction(
                             sku,
                             facility,
+                            pharmacy,
                             detail.getBatch(),
                             currentUser,
                             dispensedByLabel,
@@ -274,6 +278,7 @@ public class OneRxDispenseService {
                     inventoryTransactionService.recordTransaction(
                             sku,
                             facility,
+                            pharmacy,
                             null,
                             currentUser,
                             dispensedByLabel,
@@ -297,22 +302,23 @@ public class OneRxDispenseService {
                 LocalDateTime txTime = eventTime.plusSeconds(secondOffset++);
 
                 inventoryTransactionService.recordTransaction(
-                        sku,
-                        facility,
-                        null,
-                        currentUser,
-                        dispensedByLabel,
-                        InventoryTransaction.Type.DISPENSE,
-                        refNumber,
-                        null,
-                        null,
-                        null,
-                        unitsToDispense,
-                        currentRunningBalance,
-                        balanceAfter,
-                        "OneRx Dispense - Patient: " + patientLabel,
-                        baseNotes,
-                        txTime
+                    sku,
+                    facility,
+                    pharmacy,
+                    null,
+                    currentUser,
+                    dispensedByLabel,
+                    InventoryTransaction.Type.DISPENSE,
+                    refNumber,
+                    null,
+                    null,
+                    null,
+                    unitsToDispense,
+                    currentRunningBalance,
+                    balanceAfter,
+                    "OneRx Dispense - Patient: " + patientLabel,
+                    baseNotes,
+                    txTime
                 );
 
                 currentRunningBalance = balanceAfter;
@@ -337,6 +343,7 @@ public class OneRxDispenseService {
 
         auditLogService.logAction(
                 facility,
+                pharmacy,
                 currentUser,
                 dispensedByLabel,
                 "Dispensing",
@@ -359,8 +366,8 @@ public class OneRxDispenseService {
                 .build();
     }
 
-    private Optional<Facility> resolveFacility(String facilityCode) {
-        return facilityRepository.findByFacilityCode(facilityCode);
+    private Optional<Pharmacy> resolvePharmacy(String pharmacyCode) {
+        return pharmacyRepository.findByPharmacyCode(pharmacyCode);
     }
 
     private User getCurrentUser() {

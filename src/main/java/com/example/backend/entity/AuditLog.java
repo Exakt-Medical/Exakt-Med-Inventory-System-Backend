@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "audit_logs", indexes = {
-    @Index(name = "idx_audit_facility_created", columnList = "facilityId, createdAt"),
+    @Index(name = "idx_audit_pharmacy_created", columnList = "pharmacyId, createdAt"),
     @Index(name = "idx_audit_module_severity", columnList = "module, severity"),
     @Index(name = "idx_audit_user", columnList = "userId")
 })
@@ -30,8 +30,8 @@ public class AuditLog {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "facilityId", nullable = false)
-    private Facility facility;
+    @JoinColumn(name = "pharmacyId", nullable = false)
+    private Pharmacy pharmacy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "userId")

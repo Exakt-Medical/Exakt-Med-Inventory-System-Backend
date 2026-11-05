@@ -19,8 +19,8 @@ public class DispensedLogResponseDto {
     private String skuName;
     private String brandName;
     private String genericName;
-    private Long facilityId;
-    private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private String patientName;
     private String contactNumber;
     private Long unitsDispensed;

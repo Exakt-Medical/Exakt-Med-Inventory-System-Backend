@@ -14,21 +14,25 @@ public interface LibLocationRepository extends JpaRepository<LibLocation, Long> 
 
     Optional<LibLocation> findByCodeIgnoreCase(String code);
 
-    Optional<LibLocation> findByCodeIgnoreCaseAndFacilityId(String code, Long facilityId);
+    Optional<LibLocation> findByCodeIgnoreCaseAndPharmacyId(String code, Long pharmacyId);
 
     boolean existsByCodeIgnoreCase(String code);
 
-    boolean existsByCodeIgnoreCaseAndFacilityId(String code, Long facilityId);
+    boolean existsByCodeIgnoreCaseAndPharmacyId(String code, Long pharmacyId);
 
-    List<LibLocation> findByFacilityId(Long facilityId);
+    List<LibLocation> findByPharmacyId(Long pharmacyId);
 
-    List<LibLocation> findByFacilityIdAndIsActiveTrue(Long facilityId);
+    List<LibLocation> findByPharmacyIdAndIsActiveTrue(Long pharmacyId);
 
     List<LibLocation> findByIsActiveTrue();
 
     @Query("SELECT l.code FROM LibLocation l WHERE l.code LIKE CONCAT(:prefix, '-%')")
     List<String> findCodesByPrefix(@Param("prefix") String prefix);
 
-    @Query("SELECT l.code FROM LibLocation l WHERE (:facilityId IS NULL OR l.facility.id = :facilityId) AND l.code LIKE CONCAT(:prefix, '-%')")
-    List<String> findCodesByPrefixAndFacilityId(@Param("prefix") String prefix, @Param("facilityId") Long facilityId);
+    @Query("SELECT l.code FROM LibLocation l WHERE " +
+           "l.pharmacy.id = :pharmacyId AND " +
+           "l.code LIKE CONCAT(:prefix, '-%')")
+    List<String> findCodesByPrefixAndPharmacyId(
+            @Param("prefix") String prefix,
+            @Param("pharmacyId") Long pharmacyId);
 }

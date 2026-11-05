@@ -24,8 +24,8 @@ public class InventoryTransactionResponseDto {
     private String genericName;
     private String dosage;
     private String packagingUnit;
-    private Long facilityId;
-    private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Long userId;
     private String userName;
     private String userRole;

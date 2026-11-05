@@ -17,6 +17,8 @@ public class ProcurementDashboardResponseDto {
 
     private Long facilityId;
     private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Metrics metrics;
     private List<PriorityRestockSku> priorityRestockSkus;
     private List<RecentOrderRequest> recentOrderRequests;

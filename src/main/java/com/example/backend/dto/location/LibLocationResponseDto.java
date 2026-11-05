@@ -20,8 +20,8 @@ public class LibLocationResponseDto {
     private String code;
     private StorageType storageType;
     private String description;
-    private Long facilityId;
-    private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Boolean isActive;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

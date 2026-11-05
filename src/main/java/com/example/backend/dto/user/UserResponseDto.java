@@ -22,9 +22,11 @@ public class UserResponseDto {
     private User.Role role;
     private Boolean status;
     private Long facilityId;
+    private Long pharmacyId;
     private LocalDateTime createdAt;
     private String message;
     private List<Long> assignedFacilityIds;
+    private List<Long> assignedPharmacyIds;
 
     public UserResponseDto(Long id, String name, String username, String email, String phone,
                            User.Role role, Boolean status, Long facilityId,
@@ -37,6 +39,22 @@ public class UserResponseDto {
         this.role = role;
         this.status = status;
         this.facilityId = facilityId;
+        this.createdAt = createdAt;
+        this.message = message;
+    }
+
+    public UserResponseDto(Long id, String name, String username, String email, String phone,
+                           User.Role role, Boolean status, Long facilityId, Long pharmacyId,
+                           LocalDateTime createdAt, String message) {
+        this.id = id;
+        this.name = name;
+        this.username = username;
+        this.email = email;
+        this.phone = phone;
+        this.role = role;
+        this.status = status;
+        this.facilityId = facilityId;
+        this.pharmacyId = pharmacyId;
         this.createdAt = createdAt;
         this.message = message;
     }

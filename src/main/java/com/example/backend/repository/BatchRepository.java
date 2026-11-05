@@ -16,17 +16,17 @@ import java.util.Optional;
 @Repository
 public interface BatchRepository extends JpaRepository<Batch, Long> {
 
-    List<Batch> findByFacilityIdOrderByReceivedAtDesc(Long facilityId);
+    List<Batch> findByPharmacyIdOrderByReceivedAtDesc(Long pharmacyId);
 
-    List<Batch> findByFacilityIdAndStatusOrderByReceivedAtDesc(Long facilityId, Batch.Status status);
+    List<Batch> findByPharmacyIdAndStatusOrderByReceivedAtDesc(Long pharmacyId, Batch.Status status);
 
-    Optional<Batch> findByBatchNumAndFacilityId(String batchNum, Long facilityId);
+    Optional<Batch> findByBatchNumAndPharmacyId(String batchNum, Long pharmacyId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE b.id = :id")
     Optional<Batch> findByIdForUpdate(@Param("id") Long id);
 
-    boolean existsByBatchNumAndFacilityId(String batchNum, Long facilityId);
+    boolean existsByBatchNumAndPharmacyId(String batchNum, Long pharmacyId);
 
     List<Batch> findByOrderedItemId(Long orderedItemId);
 
@@ -36,55 +36,56 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
 
     List<Batch> findByStatusAndExpiryDateLessThanEqual(Batch.Status status, java.time.LocalDate date);
 
-    List<Batch> findByFacilityIdAndStatusAndExpiryDateLessThanEqual(Long facilityId, Batch.Status status, java.time.LocalDate date);
+    List<Batch> findByPharmacyIdAndStatusAndExpiryDateLessThanEqual(Long pharmacyId, Batch.Status status, java.time.LocalDate date);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE " +
-           "b.facility.id = :facilityId AND " +
+           "b.pharmacy.id = :pharmacyId AND " +
            "b.orderedItem.sku.id = :skuId AND " +
            "(b.status = com.example.backend.entity.Batch.Status.Expired OR (b.status = com.example.backend.entity.Batch.Status.Available AND b.expiryDate <= :date)) AND " +
            "(b.skuDeducted IS NULL OR b.skuDeducted = false) AND " +
            "b.units > 0")
     List<Batch> findExpiredBatches(
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("skuId") Long skuId,
             @Param("date") java.time.LocalDate date);
 
     @Query("SELECT COALESCE(SUM(b.units), 0) FROM Batch b WHERE " +
-           "b.facility.id = :facilityId AND " +
+           "b.pharmacy.id = :pharmacyId AND " +
            "b.orderedItem.sku.id = :skuId AND " +
            "(b.status = com.example.backend.entity.Batch.Status.Expired OR (b.status = com.example.backend.entity.Batch.Status.Available AND b.expiryDate <= :today)) AND " +
            "(b.skuDeducted IS NULL OR b.skuDeducted = false) AND " +
            "b.units > 0")
     long sumUndeductedExpiredUnitsForSku(
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("skuId") Long skuId,
             @Param("today") java.time.LocalDate today);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE b.orderedItem.sku.id = :skuId " +
-           "AND b.facility.id = :facilityId " +
+           "AND b.pharmacy.id = :pharmacyId " +
            "AND b.status = :status " +
            "AND b.expiryDate > :today " +
            "AND b.units > 0 " +
            "ORDER BY b.expiryDate ASC, b.id ASC")
     List<Batch> findAvailableBatchesForSkuFEFO(
             @Param("skuId") Long skuId,
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("status") Batch.Status status,
             @Param("today") java.time.LocalDate today);
 
-    @Query("SELECT b FROM Batch b WHERE b.facility.id = :facilityId " +
-           "AND b.orderedItem.sku.id = :skuId " +
+    @Query("SELECT b FROM Batch b WHERE " +
+           "b.pharmacy.id = :pharmacyId AND " +
+           "b.orderedItem.sku.id = :skuId " +
            "ORDER BY b.receivedAt ASC, b.id ASC")
     List<Batch> findBatchesForSkuOrderByReceivedAtAsc(
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("skuId") Long skuId);
 
     @Query(value = "SELECT b FROM Batch b " +
            "LEFT JOIN b.orderedItem oi " +
            "LEFT JOIN oi.sku s " +
-           "WHERE b.facility.id = :facilityId " +
+           "WHERE b.pharmacy.id = :pharmacyId " +
            "AND (:search IS NULL OR :search = '' OR " +
            "     LOWER(b.batchNum) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "     LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -102,7 +103,7 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
            countQuery = "SELECT COUNT(b) FROM Batch b " +
            "LEFT JOIN b.orderedItem oi " +
            "LEFT JOIN oi.sku s " +
-           "WHERE b.facility.id = :facilityId " +
+           "WHERE b.pharmacy.id = :pharmacyId " +
            "AND (:search IS NULL OR :search = '' OR " +
            "     LOWER(b.batchNum) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "     LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -118,7 +119,7 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
            "     (:expiryFilter = 'NEAR_EXPIRY' AND b.expiryDate > :today AND b.expiryDate <= :nearExpiryDate) OR " +
            "     (:expiryFilter = 'HEALTHY' AND b.expiryDate > :nearExpiryDate))")
     Page<Batch> findBatchesPaginated(
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("search") String search,
             @Param("status") String status,
             @Param("sku") String sku,
@@ -128,36 +129,37 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
             Pageable pageable);
 
     // 2. Aggregate KPI counts
-    long countByFacilityId(Long facilityId);
+    @Query("SELECT COUNT(b) FROM Batch b WHERE b.pharmacy.id = :pharmacyId")
+    long countByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     @Query("SELECT COALESCE(SUM(b.units), 0) FROM Batch b " +
-           "WHERE b.facility.id = :facilityId AND b.status = com.example.backend.entity.Batch.Status.Available")
-    long sumActiveStockByFacilityId(@Param("facilityId") Long facilityId);
+           "WHERE b.pharmacy.id = :pharmacyId AND b.status = com.example.backend.entity.Batch.Status.Available")
+    long sumActiveStockByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     @Query("SELECT COUNT(b) FROM Batch b " +
-           "WHERE b.facility.id = :facilityId AND b.units > 0 AND b.expiryDate <= :nearExpiryDate")
-    long countExpiryAlertsByFacilityId(@Param("facilityId") Long facilityId, @Param("nearExpiryDate") java.time.LocalDate nearExpiryDate);
+           "WHERE b.pharmacy.id = :pharmacyId AND b.units > 0 AND b.expiryDate <= :nearExpiryDate")
+    long countExpiryAlertsByPharmacyId(@Param("pharmacyId") Long pharmacyId, @Param("nearExpiryDate") java.time.LocalDate nearExpiryDate);
 
     @Query("SELECT COUNT(b) FROM Batch b " +
-           "WHERE b.facility.id = :facilityId AND b.status = com.example.backend.entity.Batch.Status.Quarantined")
-    long countQuarantinedByFacilityId(@Param("facilityId") Long facilityId);
+           "WHERE b.pharmacy.id = :pharmacyId AND b.status = com.example.backend.entity.Batch.Status.Quarantined")
+    long countQuarantinedByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     // 3. Distinct SKU names for filter dropdown
     @Query("SELECT DISTINCT s.name FROM Batch b " +
            "JOIN b.orderedItem oi " +
            "JOIN oi.sku s " +
-           "WHERE b.facility.id = :facilityId " +
+           "WHERE b.pharmacy.id = :pharmacyId " +
            "ORDER BY s.name ASC")
-    List<String> findDistinctSkuNamesByFacilityId(@Param("facilityId") Long facilityId);
+    List<String> findDistinctSkuNamesByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     // 4. Aggregate expired batches needing deduction grouped by SKU
     @Query("SELECT b.orderedItem.sku.id, COUNT(b), COALESCE(SUM(b.units), 0) FROM Batch b " +
-           "WHERE b.facility.id = :facilityId " +
+           "WHERE b.pharmacy.id = :pharmacyId " +
            "AND (b.status = com.example.backend.entity.Batch.Status.Expired OR (b.status = com.example.backend.entity.Batch.Status.Available AND b.expiryDate <= :today)) " +
            "AND (b.skuDeducted IS NULL OR b.skuDeducted = false) " +
            "AND b.units > 0 " +
            "GROUP BY b.orderedItem.sku.id")
-    List<Object[]> findExpiredBatchMetricsByFacilityId(
-            @Param("facilityId") Long facilityId,
+    List<Object[]> findExpiredBatchMetricsByPharmacyId(
+            @Param("pharmacyId") Long pharmacyId,
             @Param("today") java.time.LocalDate today);
 }

@@ -9,9 +9,9 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "batches", indexes = {
-    @Index(name = "idx_batch_facility_received", columnList = "facilityId, receivedAt"),
-    @Index(name = "idx_batch_facility_num", columnList = "facilityId, batchNum"),
-    @Index(name = "idx_batch_facility_status", columnList = "facilityId, status"),
+    @Index(name = "idx_batch_pharmacy_received", columnList = "pharmacyId, receivedAt"),
+    @Index(name = "idx_batch_pharmacy_num", columnList = "pharmacyId, batchNum"),
+    @Index(name = "idx_batch_pharmacy_status", columnList = "pharmacyId, status"),
     @Index(name = "idx_batch_location", columnList = "locationId")
 })
 @Getter
@@ -29,8 +29,8 @@ public class Batch {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "facilityId", nullable = false)
-    private Facility facility;
+    @JoinColumn(name = "pharmacyId", nullable = false)
+    private Pharmacy pharmacy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "orderedItemId")

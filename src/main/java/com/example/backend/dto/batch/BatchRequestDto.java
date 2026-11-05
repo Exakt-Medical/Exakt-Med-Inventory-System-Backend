@@ -16,7 +16,8 @@ import java.time.LocalDate;
 @AllArgsConstructor
 public class BatchRequestDto {
 
-    private Long facilityId;
+    @NotNull(message = "Pharmacy ID is required")
+    private Long pharmacyId;
 
     @NotNull(message = "Ordered item ID is required")
     private Long orderedItemId;

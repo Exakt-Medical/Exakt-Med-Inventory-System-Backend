@@ -1,31 +1,31 @@
 package com.example.backend.service;
 
+import com.example.backend.dto.common.PageResponseDto;
+import com.example.backend.dto.sku.SkuDropdownDto;
 import com.example.backend.dto.sku.SkuRequestDto;
 import com.example.backend.dto.sku.SkuResponseDto;
 import com.example.backend.dto.sku.SkuStockAdjustmentDto;
+import com.example.backend.dto.sku.SkuSummaryDto;
 import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Batch;
-import com.example.backend.entity.Facility;
+import com.example.backend.entity.DispensedLog;
 import com.example.backend.entity.InventoryTransaction;
 import com.example.backend.entity.LibMedicine;
-import com.example.backend.entity.Sku;
-import com.example.backend.entity.User;
-import com.example.backend.entity.RestockRequest;
+import com.example.backend.entity.LibPackagingUnit;
 import com.example.backend.entity.Order;
 import com.example.backend.entity.OrderedItem;
-import com.example.backend.entity.DispensedLog;
+import com.example.backend.entity.Pharmacy;
+import com.example.backend.entity.RestockRequest;
+import com.example.backend.entity.Sku;
+import com.example.backend.entity.User;
 import com.example.backend.repository.DispensedLogRepository;
-import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.LibMedicineRepository;
-import com.example.backend.repository.OrderedItemRepository;
-import com.example.backend.entity.LibPackagingUnit;
 import com.example.backend.repository.LibPackagingUnitRepository;
+import com.example.backend.repository.OrderedItemRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.RestockRequestRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.UserRepository;
-import com.example.backend.dto.common.PageResponseDto;
-import com.example.backend.dto.sku.SkuDropdownDto;
-import com.example.backend.dto.sku.SkuSummaryDto;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 public class SkuService {
 
     private final SkuRepository skuRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final LibMedicineRepository libMedicineRepository;
     private final BatchService batchService;
     private final InventoryTransactionService inventoryTransactionService;
@@ -62,7 +62,7 @@ public class SkuService {
     private final FacilityAccessGuard facilityAccessGuard;
 
     public SkuService(SkuRepository skuRepository,
-                      FacilityRepository facilityRepository,
+                      PharmacyRepository pharmacyRepository,
                       LibMedicineRepository libMedicineRepository,
                       BatchService batchService,
                       InventoryTransactionService inventoryTransactionService,
@@ -74,7 +74,7 @@ public class SkuService {
                       DispensedLogRepository dispensedLogRepository,
                       FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.libMedicineRepository = libMedicineRepository;
         this.batchService = batchService;
         this.inventoryTransactionService = inventoryTransactionService;
@@ -399,10 +399,12 @@ public class SkuService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public SkuResponseDto createSku(SkuRequestDto request) {
-        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
-
-        Facility facility = facilityRepository.findById(request.getFacilityId())
-                .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
+        if (request.getPharmacyId() == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
+        Pharmacy pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
 
         LibMedicine libMedicine = libMedicineRepository.findById(request.getMedicineId())
                 .orElseThrow(() -> new RuntimeException("Medicine not found with id: " + request.getMedicineId()));
@@ -434,13 +436,13 @@ public class SkuService {
                 ? request.getName().trim().toUpperCase()
                 : generateSkuCode(request.getBrandName(), libMedicine, formCode, packagingInfo.code);
 
-        // Check uniqueness in facility
-        if (skuRepository.existsByFacilityIdAndName(facility.getId(), skuName)) {
-            throw new RuntimeException("SKU code '" + skuName + "' already exists in this facility.");
+        // Check uniqueness in pharmacy
+        if (skuRepository.existsByPharmacyIdAndName(pharmacy.getId(), skuName)) {
+            throw new RuntimeException("SKU code '" + skuName + "' already exists in this pharmacy.");
         }
 
         Sku sku = new Sku();
-        sku.setFacility(facility);
+        sku.setPharmacy(pharmacy);
         sku.setLibMedicine(libMedicine);
         sku.setName(skuName);
         sku.setBrandName(request.getBrandName().trim());
@@ -454,7 +456,7 @@ public class SkuService {
         Sku savedSku = skuRepository.save(sku);
 
         auditLogService.logAction(
-                facility,
+                pharmacy,
                 getCurrentUser(),
                 "SKU Catalog",
                 "SKU_CREATED",
@@ -473,7 +475,7 @@ public class SkuService {
     @Transactional
     @PreAuthorize("isAuthenticated()")
     public PageResponseDto<SkuResponseDto> getSkusPaginated(
-            Long facilityId,
+            Long pharmacyId,
             String search,
             String status,
             int page,
@@ -481,16 +483,16 @@ public class SkuService {
             String sortBy,
             String sortDir) {
 
-        if (facilityId == null) {
-            throw new RuntimeException("Facility ID is strictly required.");
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is strictly required.");
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        if (!facilityRepository.existsById(facilityId)) {
-            throw new RuntimeException("Facility not found with id: " + facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        if (!pharmacyRepository.existsById(pharmacyId)) {
+            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
         }
 
         // Ensure past-due batches have their status marked Expired
-        batchService.markPastDueBatchesAsExpired(facilityId);
+        batchService.markPastDueBatchesAsExpired(pharmacyId);
 
         int pageIndex = Math.max(0, page);
         int pageSize = size > 0 ? size : 10;
@@ -512,8 +514,8 @@ public class SkuService {
         String trimmedSearch = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
         String trimmedStatus = (status != null && !status.trim().isEmpty()) ? status.trim().toUpperCase() : "ALL";
 
-        Page<Sku> skuPage = skuRepository.findSkusPaginated(facilityId, trimmedSearch, trimmedStatus, pageable);
-        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(facilityId);
+        Page<Sku> skuPage = skuRepository.findSkusPaginated(pharmacyId, trimmedSearch, trimmedStatus, pageable);
+        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
 
         Page<SkuResponseDto> dtoPage = skuPage.map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())));
         return PageResponseDto.from(dtoPage);
@@ -522,16 +524,16 @@ public class SkuService {
     // 2b. GET SKU SUMMARY KPIS
     @Transactional(readOnly = true)
     @PreAuthorize("isAuthenticated()")
-    public SkuSummaryDto getSkuSummary(Long facilityId) {
-        if (facilityId == null) {
-            throw new RuntimeException("Facility ID is strictly required.");
+    public SkuSummaryDto getSkuSummary(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is strictly required.");
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
-        long totalSkus = skuRepository.countByFacilityId(facilityId);
-        long optimalCount = skuRepository.countOptimalByFacilityId(facilityId);
-        long reorderCount = skuRepository.countReorderNeededByFacilityId(facilityId);
-        long criticalCount = skuRepository.countCriticalByFacilityId(facilityId);
+        long totalSkus = skuRepository.countByPharmacyId(pharmacyId);
+        long optimalCount = skuRepository.countOptimalByPharmacyId(pharmacyId);
+        long reorderCount = skuRepository.countReorderNeededByPharmacyId(pharmacyId);
+        long criticalCount = skuRepository.countCriticalByPharmacyId(pharmacyId);
 
         return SkuSummaryDto.builder()
                 .totalSkus(totalSkus)
@@ -544,14 +546,14 @@ public class SkuService {
     // 2c. GET LIGHTWEIGHT SKU DROPDOWN LIST (For modal selectors)
     @Transactional(readOnly = true)
     @PreAuthorize("isAuthenticated()")
-    public List<SkuDropdownDto> getDropdownSkus(Long facilityId) {
-        if (facilityId == null) {
+    public List<SkuDropdownDto> getDropdownSkus(Long pharmacyId) {
+        if (pharmacyId == null) {
             return Collections.emptyList();
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
-        List<Sku> skus = skuRepository.findDropdownSkusByFacilityId(facilityId);
-        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(facilityId);
+        List<Sku> skus = skuRepository.findDropdownSkusByPharmacyId(pharmacyId);
+        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
 
         return skus.stream().map(sku -> {
             SkuOrderMetrics metrics = activeMetricsMap.get(sku.getId());
@@ -584,8 +586,8 @@ public class SkuService {
     public SkuResponseDto getSkuById(Long id) {
         Sku sku = skuRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
-        if (sku.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(sku.getFacility().getId());
+        if (sku.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
         }
         return mapToResponseDto(sku, null);
     }
@@ -597,16 +599,17 @@ public class SkuService {
         Sku existingSku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
 
-        if (existingSku.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(existingSku.getFacility().getId());
+        if (existingSku.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(existingSku.getPharmacy().getId());
         }
-        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
 
-        // If facility changed
-        if (!existingSku.getFacility().getId().equals(request.getFacilityId())) {
-            Facility newFacility = facilityRepository.findById(request.getFacilityId())
-                    .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
-            existingSku.setFacility(newFacility);
+        if (request.getPharmacyId() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
+            if (existingSku.getPharmacy() == null || !existingSku.getPharmacy().getId().equals(request.getPharmacyId())) {
+                Pharmacy newPharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                        .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
+                existingSku.setPharmacy(newPharmacy);
+            }
         }
 
         // If medicine changed
@@ -650,8 +653,9 @@ public class SkuService {
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             newName = request.getName().trim().toUpperCase();
         }
-        if (skuRepository.existsByFacilityIdAndNameAndIdNot(existingSku.getFacility().getId(), newName, existingSku.getId())) {
-            throw new RuntimeException("SKU code '" + newName + "' already exists in this facility.");
+        if (existingSku.getPharmacy() != null &&
+                skuRepository.existsByPharmacyIdAndNameAndIdNot(existingSku.getPharmacy().getId(), newName, existingSku.getId())) {
+            throw new RuntimeException("SKU code '" + newName + "' already exists in this pharmacy.");
         }
         existingSku.setName(newName);
 
@@ -662,7 +666,7 @@ public class SkuService {
         Sku updatedSku = skuRepository.save(existingSku);
 
         auditLogService.logAction(
-                updatedSku.getFacility(),
+                updatedSku.getPharmacy(),
                 getCurrentUser(),
                 "SKU Catalog",
                 "SKU_UPDATED",
@@ -684,14 +688,14 @@ public class SkuService {
         Sku sku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
 
-        if (sku.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(sku.getFacility().getId());
+        if (sku.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
         }
 
         skuRepository.delete(sku);
 
         auditLogService.logAction(
-                sku.getFacility(),
+                sku.getPharmacy(),
                 getCurrentUser(),
                 "SKU Catalog",
                 "SKU_DELETED",
@@ -711,16 +715,16 @@ public class SkuService {
         Sku sku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
 
-        if (sku.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(sku.getFacility().getId());
+        if (sku.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
         }
 
         long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
         long newUnits;
         long unitsToDeduct = 0L;
         Batch targetBatch = null;
-        Long facilityId = sku.getFacility() != null ? sku.getFacility().getId() : null;
-        boolean hasBatches = facilityId != null && batchService.hasBatchesForSku(facilityId, sku.getId());
+        Long pharmacyId = sku.getPharmacy() != null ? sku.getPharmacy().getId() : null;
+        boolean hasBatches = pharmacyId != null && batchService.hasBatchesForSku(pharmacyId, sku.getId());
 
         switch (request.getType()) {
             case ADD:
@@ -733,7 +737,7 @@ public class SkuService {
                 }
                 break;
             case SUBTRACT:
-                if (facilityId != null && batchService.hasUnprocessedExpiredBatches(facilityId, sku.getId())) {
+                if (pharmacyId != null && batchService.hasUnprocessedExpiredBatches(pharmacyId, sku.getId())) {
                     throw new RuntimeException("This SKU has unprocessed expired batches. Please deduct expired batches first before adjusting stock.");
                 }
                 if (request.getAmount() > currentUnits) {
@@ -753,7 +757,7 @@ public class SkuService {
 
         List<Batch> deductedBatches = new ArrayList<>();
         List<BatchService.BatchDeductionDetail> fefoDeductions = new ArrayList<>();
-        if (unitsToDeduct > 0 && savedSku.getFacility() != null) {
+        if (unitsToDeduct > 0 && savedSku.getPharmacy() != null) {
             if (isDispensed) {
                 // When reason is Dispensed, patient name and contact number are required
                 if (request.getPatientName() == null || request.getPatientName().trim().isEmpty()) {
@@ -764,7 +768,7 @@ public class SkuService {
                 }
 
                 // FEFO: Deduct automatically from the nearest expiring available batches
-                fefoDeductions = batchService.deductBatchesFEFO(savedSku.getId(), savedSku.getFacility().getId(), unitsToDeduct);
+                fefoDeductions = batchService.deductBatchesFEFO(savedSku.getId(), pharmacyId, unitsToDeduct);
                 long totalDeductedFromBatches = fefoDeductions.stream()
                         .mapToLong(BatchService.BatchDeductionDetail::getDeductedUnits)
                         .sum();
@@ -860,7 +864,7 @@ public class SkuService {
                 long balanceAfterBatch = runningBalance - deducted;
                 inventoryTransactionService.recordTransaction(
                         savedSku,
-                        savedSku.getFacility(),
+                        savedSku.getPharmacy(),
                         b,
                         currentUser,
                         txType,
@@ -880,7 +884,7 @@ public class SkuService {
         } else {
             inventoryTransactionService.recordTransaction(
                     savedSku,
-                    savedSku.getFacility(),
+                    savedSku.getPharmacy(),
                     targetBatch,
                     currentUser,
                     txType,
@@ -937,7 +941,7 @@ public class SkuService {
         );
 
         auditLogService.logAction(
-                savedSku.getFacility(),
+                savedSku.getPharmacy(),
                 getCurrentUser(),
                 "Inventory",
                 action,
@@ -955,19 +959,19 @@ public class SkuService {
     // 7. GET SKUS THAT NEED REORDERING (units <= reorderLevel, excluding active Pending/Approved orders)
     @Transactional
     @PreAuthorize("isAuthenticated()")
-    public List<SkuResponseDto> getReorderNeededSkus(Long facilityId, String search) {
-        if (facilityId == null) {
-            throw new RuntimeException("Facility ID is strictly required.");
+    public List<SkuResponseDto> getReorderNeededSkus(Long pharmacyId, String search) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is strictly required.");
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        if (!facilityRepository.existsById(facilityId)) {
-            throw new RuntimeException("Facility not found with id: " + facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        if (!pharmacyRepository.existsById(pharmacyId)) {
+            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
         }
 
-        batchService.markPastDueBatchesAsExpired(facilityId);
+        batchService.markPastDueBatchesAsExpired(pharmacyId);
         String query = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        List<Sku> skus = skuRepository.findReorderNeededSkus(facilityId, query);
-        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(facilityId);
+        List<Sku> skus = skuRepository.findReorderNeededSkus(pharmacyId, query);
+        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
         return skus.stream()
                 .map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())))
                 .collect(Collectors.toList());
@@ -983,14 +987,14 @@ public class SkuService {
         long expiredUnits = 0L;
     }
 
-    private Map<Long, SkuOrderMetrics> getActiveOrderMetricsMap(Long facilityId) {
-        if (facilityId == null) {
+    private Map<Long, SkuOrderMetrics> getActiveOrderMetricsMap(Long pharmacyId) {
+        if (pharmacyId == null) {
             return Collections.emptyMap();
         }
         Map<Long, SkuOrderMetrics> map = new HashMap<>();
 
         // 1. Active Pharmacist Restock Requests
-        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByFacilityId(facilityId);
+        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByPharmacyId(pharmacyId);
         for (RestockRequest rr : activeRestocks) {
             if (rr.getSku() != null && rr.getSku().getId() != null) {
                 SkuOrderMetrics m = map.computeIfAbsent(rr.getSku().getId(), k -> new SkuOrderMetrics());
@@ -1008,7 +1012,7 @@ public class SkuService {
         }
 
         // 2. Active Ordered Items (from POs, whether automated threshold PO or pharmacist requested PO)
-        List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByFacilityId(facilityId);
+        List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByPharmacyId(pharmacyId);
         for (OrderedItem oi : activeItems) {
             if (oi.getSku() != null && oi.getSku().getId() != null && oi.getOrder() != null) {
                 SkuOrderMetrics m = map.computeIfAbsent(oi.getSku().getId(), k -> new SkuOrderMetrics());
@@ -1023,7 +1027,7 @@ public class SkuService {
         }
 
         // 3. Expired batches needing deduction
-        Map<Long, long[]> expiredMetrics = batchService.getExpiredBatchMetrics(facilityId);
+        Map<Long, long[]> expiredMetrics = batchService.getExpiredBatchMetrics(pharmacyId);
         for (Map.Entry<Long, long[]> entry : expiredMetrics.entrySet()) {
             SkuOrderMetrics m = map.computeIfAbsent(entry.getKey(), k -> new SkuOrderMetrics());
             m.expiredBatchesCount = entry.getValue()[0];
@@ -1033,12 +1037,12 @@ public class SkuService {
         return map;
     }
 
-    private SkuOrderMetrics getSingleSkuOrderMetrics(Long facilityId, Long skuId) {
-        if (facilityId == null || skuId == null) {
+    private SkuOrderMetrics getSingleSkuOrderMetrics(Long pharmacyId, Long skuId) {
+        if (pharmacyId == null || skuId == null) {
             return new SkuOrderMetrics();
         }
         SkuOrderMetrics m = new SkuOrderMetrics();
-        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByFacilityIdAndSkuId(facilityId, skuId);
+        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByPharmacyIdAndSkuId(pharmacyId, skuId);
         for (RestockRequest rr : activeRestocks) {
             long units = rr.getRequestedUnits() != null ? rr.getRequestedUnits() : 0L;
             m.hasActiveRestockRequest = true;
@@ -1050,7 +1054,7 @@ public class SkuService {
                 m.pendingUnits += units;
             }
         }
-        List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByFacilityIdAndSkuId(facilityId, skuId);
+        List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByPharmacyIdAndSkuId(pharmacyId, skuId);
         for (OrderedItem oi : activeItems) {
             if (oi.getOrder() != null) {
                 long units = oi.getOrderedUnits() != null ? oi.getOrderedUnits() : 0L;
@@ -1063,7 +1067,7 @@ public class SkuService {
             }
         }
 
-        Map<Long, long[]> expiredMetrics = batchService.getExpiredBatchMetrics(facilityId);
+        Map<Long, long[]> expiredMetrics = batchService.getExpiredBatchMetrics(pharmacyId);
         long[] skuExpired = expiredMetrics.get(skuId);
         if (skuExpired != null) {
             m.expiredBatchesCount = skuExpired[0];
@@ -1078,9 +1082,9 @@ public class SkuService {
         SkuResponseDto dto = new SkuResponseDto();
         dto.setId(sku.getId());
 
-        if (sku.getFacility() != null) {
-            dto.setFacilityId(sku.getFacility().getId());
-            dto.setFacilityName(sku.getFacility().getName());
+        if (sku.getPharmacy() != null) {
+            dto.setPharmacyId(sku.getPharmacy().getId());
+            dto.setPharmacyName(sku.getPharmacy().getPharmacyName());
         }
 
         if (sku.getLibMedicine() != null) {
@@ -1138,8 +1142,9 @@ public class SkuService {
     // Overloaded helper for single-entity callers
     private SkuResponseDto mapToResponseDto(Sku sku, String message) {
         SkuOrderMetrics metrics = null;
-        if (sku.getFacility() != null && sku.getId() != null) {
-            metrics = getSingleSkuOrderMetrics(sku.getFacility().getId(), sku.getId());
+        Long pharmId = sku.getPharmacy() != null ? sku.getPharmacy().getId() : null;
+        if (pharmId != null && sku.getId() != null) {
+            metrics = getSingleSkuOrderMetrics(pharmId, sku.getId());
         }
         return mapToResponseDto(sku, message, metrics);
     }

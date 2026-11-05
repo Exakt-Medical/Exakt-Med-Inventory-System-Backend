@@ -24,7 +24,7 @@ public class DashboardService {
     private final OrderRepository orderRepository;
     private final OrderedItemRepository orderedItemRepository;
     private final SupplierRepository supplierRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final RestockRequestRepository restockRequestRepository;
     private final FacilityAccessGuard facilityAccessGuard;
 
@@ -39,7 +39,7 @@ public class DashboardService {
                             OrderRepository orderRepository,
                             OrderedItemRepository orderedItemRepository,
                             SupplierRepository supplierRepository,
-                            FacilityRepository facilityRepository,
+                            PharmacyRepository pharmacyRepository,
                             RestockRequestRepository restockRequestRepository,
                             FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
@@ -47,18 +47,27 @@ public class DashboardService {
         this.orderRepository = orderRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.supplierRepository = supplierRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.restockRequestRepository = restockRequestRepository;
         this.facilityAccessGuard = facilityAccessGuard;
     }
 
     // 1. GET PHARMACIST DASHBOARD
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
-    public PharmacistDashboardResponseDto getPharmacistDashboard(Long facilityId) {
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        String facilityName = resolveFacilityName(facilityId);
-        List<Sku> skus = fetchSkus(facilityId);
-        List<Batch> batches = fetchBatches(facilityId);
+    public PharmacistDashboardResponseDto getPharmacistDashboard(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
+        Pharmacy pharmacy = pharmacyRepository.findById(pharmacyId)
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + pharmacyId));
+        Long facilityId = pharmacy.getFacility() != null ? pharmacy.getFacility().getId() : null;
+        String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : null;
+        String pharmacyName = pharmacy.getPharmacyName();
+
+        List<Sku> skus = skuRepository.findByPharmacyId(pharmacyId);
+        List<Batch> batches = batchRepository.findByPharmacyIdOrderByReceivedAtDesc(pharmacyId);
 
         LocalDate today = LocalDate.now();
         LocalDate nearExpiryLimit = today.plusDays(90);
@@ -114,7 +123,7 @@ public class DashboardService {
                     .name(entry.getKey())
                     .value(entry.getValue())
                     .color(PALETTE[colorIdx % PALETTE.length])
-                    .build());  
+                    .build());
             colorIdx++;
         }
         stockDistribution.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
@@ -159,6 +168,8 @@ public class DashboardService {
         return PharmacistDashboardResponseDto.builder()
                 .facilityId(facilityId)
                 .facilityName(facilityName)
+                .pharmacyId(pharmacyId)
+                .pharmacyName(pharmacyName)
                 .metrics(metrics)
                 .skuStockDistribution(stockDistribution)
                 .skuHealthBarData(healthBarData)
@@ -168,13 +179,22 @@ public class DashboardService {
 
     // 2. GET PROCUREMENT DASHBOARD
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement')")
-    public ProcurementDashboardResponseDto getProcurementDashboard(Long facilityId) {
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        String facilityName = resolveFacilityName(facilityId);
-        List<Sku> skus = fetchSkus(facilityId);
-        List<Batch> batches = fetchBatches(facilityId);
-        List<Order> orders = fetchOrders(facilityId);
-        List<Supplier> suppliers = fetchSuppliers(facilityId);
+    public ProcurementDashboardResponseDto getProcurementDashboard(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
+        Pharmacy pharmacy = pharmacyRepository.findById(pharmacyId)
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + pharmacyId));
+        Long facilityId = pharmacy.getFacility() != null ? pharmacy.getFacility().getId() : null;
+        String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : null;
+        String pharmacyName = pharmacy.getPharmacyName();
+
+        List<Sku> skus = skuRepository.findByPharmacyId(pharmacyId);
+        List<Batch> batches = batchRepository.findByPharmacyIdOrderByReceivedAtDesc(pharmacyId);
+        List<Order> orders = orderRepository.findByPharmacyIdOrderByCreatedAtDesc(pharmacyId);
+        List<Supplier> suppliers = fetchSuppliers(facilityId, pharmacyId);
 
         LocalDate today = LocalDate.now();
 
@@ -182,18 +202,14 @@ public class DashboardService {
         // (Pending, Approved, Partially_Received) to prevent duplicate requisitions
         Set<Long> skusWithActiveOrders = new HashSet<>();
 
-        List<OrderedItem> activeItems = (facilityId != null)
-                ? orderedItemRepository.findActiveOrderedItemsByFacilityId(facilityId)
-                : orderedItemRepository.findAllActiveOrderedItems();
+        List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByPharmacyId(pharmacyId);
         for (OrderedItem oi : activeItems) {
             if (oi.getSku() != null && oi.getSku().getId() != null) {
                 skusWithActiveOrders.add(oi.getSku().getId());
             }
         }
 
-        List<RestockRequest> activeRestocks = (facilityId != null)
-                ? restockRequestRepository.findActiveRestockRequestsByFacilityId(facilityId)
-                : restockRequestRepository.findAllActiveRestockRequests();
+        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByPharmacyId(pharmacyId);
         for (RestockRequest rr : activeRestocks) {
             if (rr.getSku() != null && rr.getSku().getId() != null) {
                 skusWithActiveOrders.add(rr.getSku().getId());
@@ -301,7 +317,7 @@ public class DashboardService {
                     }
 
                     String supplierName = o.getSupplier() != null ? o.getSupplier().getName() : "Unassigned Supplier";
-                    String dest = o.getFacility() != null ? o.getFacility().getName() : facilityName;
+                    String dest = o.getPharmacy() != null ? o.getPharmacy().getPharmacyName() : pharmacyName;
                     String dateStr = o.getCreatedAt() != null ? o.getCreatedAt().format(dateFormatter) : today.format(dateFormatter);
                     String statusStr = o.getStatus() == Order.Status.Pending
                             ? "Pending Approval"
@@ -324,6 +340,8 @@ public class DashboardService {
         return ProcurementDashboardResponseDto.builder()
                 .facilityId(facilityId)
                 .facilityName(facilityName)
+                .pharmacyId(pharmacyId)
+                .pharmacyName(pharmacyName)
                 .metrics(metrics)
                 .priorityRestockSkus(priorityRestockSkus)
                 .recentOrderRequests(recentOrders)
@@ -332,78 +350,41 @@ public class DashboardService {
 
     // 3. GET DASHBOARD SUMMARY (Combined)
     @PreAuthorize("isAuthenticated()")
-    public DashboardResponseDto getDashboardSummary(Long facilityId) {
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-        String facilityName = resolveFacilityName(facilityId);
+    public DashboardResponseDto getDashboardSummary(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
+        Pharmacy pharmacy = pharmacyRepository.findById(pharmacyId)
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + pharmacyId));
+        Long facilityId = pharmacy.getFacility() != null ? pharmacy.getFacility().getId() : null;
+        String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : null;
+        String pharmacyName = pharmacy.getPharmacyName();
+
         return DashboardResponseDto.builder()
                 .facilityId(facilityId)
                 .facilityName(facilityName)
-                .pharmacistDashboard(getPharmacistDashboard(facilityId))
-                .procurementDashboard(getProcurementDashboard(facilityId))
+                .pharmacyId(pharmacyId)
+                .pharmacyName(pharmacyName)
+                .pharmacistDashboard(getPharmacistDashboard(pharmacyId))
+                .procurementDashboard(getProcurementDashboard(pharmacyId))
                 .build();
     }
 
     // --- HELPER METHODS ---
 
-    private String resolveFacilityName(Long facilityId) {
-        if (facilityId == null) {
-            return "All Facilities";
+    private List<Supplier> fetchSuppliers(Long facilityId, Long pharmacyId) {
+        if (pharmacyId != null) {
+            List<Supplier> byPharmacy = supplierRepository.findByPharmacyId(pharmacyId);
+            if (!byPharmacy.isEmpty() || facilityId == null) {
+                return byPharmacy;
+            }
         }
-        return facilityRepository.findById(facilityId)
-                .map(Facility::getName)
-                .orElse("Facility #" + facilityId);
-    }
-
-    private List<Sku> fetchSkus(Long facilityId) {
-        if (facilityId != null) {
-            return skuRepository.findByFacilityId(facilityId);
-        }
-        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
-        if (accessibleIds == null) {
-            return skuRepository.findAll();
-        }
-        return skuRepository.findAll().stream()
-                .filter(s -> s.getFacility() != null && accessibleIds.contains(s.getFacility().getId()))
-                .collect(Collectors.toList());
-    }
-
-    private List<Batch> fetchBatches(Long facilityId) {
-        if (facilityId != null) {
-            return batchRepository.findByFacilityIdOrderByReceivedAtDesc(facilityId);
-        }
-        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
-        if (accessibleIds == null) {
-            return batchRepository.findAll();
-        }
-        return batchRepository.findAll().stream()
-                .filter(b -> b.getFacility() != null && accessibleIds.contains(b.getFacility().getId()))
-                .collect(Collectors.toList());
-    }
-
-    private List<Order> fetchOrders(Long facilityId) {
-        if (facilityId != null) {
-            return orderRepository.findByFacilityIdOrderByCreatedAtDesc(facilityId);
-        }
-        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
-        if (accessibleIds == null) {
-            return orderRepository.findAllByOrderByCreatedAtDesc();
-        }
-        return orderRepository.findAllByOrderByCreatedAtDesc().stream()
-                .filter(o -> o.getFacility() != null && accessibleIds.contains(o.getFacility().getId()))
-                .collect(Collectors.toList());
-    }
-
-    private List<Supplier> fetchSuppliers(Long facilityId) {
         if (facilityId != null) {
             return supplierRepository.findByFacilityId(facilityId);
         }
-        Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
-        if (accessibleIds == null) {
-            return supplierRepository.findAll();
-        }
-        return supplierRepository.findAll().stream()
-                .filter(s -> s.getFacility() != null && accessibleIds.contains(s.getFacility().getId()))
-                .collect(Collectors.toList());
+        return Collections.emptyList();
     }
 
     private String getCategoryName(Sku sku) {

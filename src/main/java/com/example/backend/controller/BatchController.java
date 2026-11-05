@@ -47,10 +47,10 @@ public class BatchController {
 
     // 3. GET BATCHES PAGINATED (Search strictly by batchNum)
     @GetMapping
-    @Operation(summary = "Get Batches Paginated", description = "Retrieves paginated batches by facility with optional batchNumber search and status/sku filter.")
+    @Operation(summary = "Get Batches Paginated", description = "Retrieves paginated batches by pharmacy with optional batchNumber search and status/sku filter.")
     public ResponseEntity<PageResponseDto<BatchResponseDto>> getBatchesPaginated(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId,
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
             @Parameter(description = "Search keyword (searches batchNumber or SKU)")
             @RequestParam(required = false) String search,
             @Parameter(description = "Optional batch status filter (ALL, ACTIVE, QUARANTINED, EXPIRED, DEPLETED)")
@@ -68,38 +68,37 @@ public class BatchController {
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "DESC") String sortDir) {
         return ResponseEntity.ok(batchService.getBatchesPaginated(
-                facilityId, search, status, sku, expiryFilter, page, size, sortBy, sortDir));
+                pharmacyId, search, status, sku, expiryFilter, page, size, sortBy, sortDir));
     }
 
     // 3c. GET BATCH SUMMARY KPIS
     @GetMapping("/summary")
     @Operation(summary = "Get Batch Summary KPIs", description = "Returns aggregated counts for total batches, active stock, expiry alerts, and quarantined batches.")
     public ResponseEntity<BatchSummaryDto> getBatchSummary(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(batchService.getBatchSummary(facilityId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(batchService.getBatchSummary(pharmacyId));
     }
 
     // 3d. GET DISTINCT SKUS IN BATCHES
     @GetMapping("/skus")
     @Operation(summary = "Get Distinct Batch SKUs", description = "Returns distinct SKU names present in batches for filter dropdown.")
     public ResponseEntity<List<String>> getDistinctBatchSkus(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(batchService.getDistinctBatchSkus(facilityId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(batchService.getDistinctBatchSkus(pharmacyId));
     }
 
     // 3e. GET BATCHES BY SKU
     @GetMapping("/sku/{skuId}")
-    @Operation(summary = "Get Batches by SKU", description = "Retrieves all batches for a specific SKU in a facility (ordered by receivedAt ascending).")
+    @Operation(summary = "Get Batches by SKU", description = "Retrieves all batches for a specific SKU in a pharmacy (ordered by receivedAt ascending).")
     public ResponseEntity<List<BatchResponseDto>> getBatchesBySku(
             @Parameter(description = "SKU ID", required = true)
             @PathVariable Long skuId,
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(batchService.getBatchesBySku(facilityId, skuId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(batchService.getBatchesBySku(pharmacyId, skuId));
     }
-
 
     // 4. GET BATCH BY ID
     @GetMapping("/{id}")
@@ -146,13 +145,13 @@ public class BatchController {
 
     // 6. PROCESS EXPIRED BATCHES FOR A SKU
     @PostMapping("/process-expired")
-    @Operation(summary = "Process Expired Batches for SKU", description = "Scans batches past their expiry date for a required facility and SKU, marks them EXPIRED, decrements active SKU stock, and logs audit events.")
+    @Operation(summary = "Process Expired Batches for SKU", description = "Scans batches past their expiry date for a pharmacy and SKU, marks them EXPIRED, decrements active SKU stock, and logs audit events.")
     public ResponseEntity<Map<String, Object>> processExpiredBatches(
-            @Parameter(description = "Facility ID (required)", required = true)
-            @RequestParam Long facilityId,
-            @Parameter(description = "SKU ID (required)", required = true)
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
+            @Parameter(description = "SKU ID", required = true)
             @RequestParam Long skuId) {
-        int count = batchService.processExpiredBatches(facilityId, skuId);
+        int count = batchService.processExpiredBatches(pharmacyId, skuId);
         return ResponseEntity.ok(Map.of(
                 "count", count,
                 "message", count > 0

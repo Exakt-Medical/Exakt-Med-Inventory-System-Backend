@@ -2,11 +2,16 @@ package com.example.backend.service;
 
 import com.example.backend.dto.user.UserRequestDto;
 import com.example.backend.dto.user.UserResponseDto;
+import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Facility;
+import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.User;
 import com.example.backend.entity.UserFacilityLink;
+import com.example.backend.entity.UserPharmacyLink;
 import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.UserFacilityLinkRepository;
+import com.example.backend.repository.UserPharmacyLinkRepository;
 import com.example.backend.repository.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -19,25 +24,29 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.example.backend.entity.AuditLog;
-
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
     private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final UserFacilityLinkRepository userFacilityLinkRepository;
+    private final UserPharmacyLinkRepository userPharmacyLinkRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
 
     public UserService(UserRepository userRepository,
                        FacilityRepository facilityRepository,
+                       PharmacyRepository pharmacyRepository,
                        UserFacilityLinkRepository userFacilityLinkRepository,
+                       UserPharmacyLinkRepository userPharmacyLinkRepository,
                        PasswordEncoder passwordEncoder,
                        AuditLogService auditLogService) {
         this.userRepository = userRepository;
         this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.userFacilityLinkRepository = userFacilityLinkRepository;
+        this.userPharmacyLinkRepository = userPharmacyLinkRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditLogService = auditLogService;
     }
@@ -61,33 +70,62 @@ public class UserService {
 
         User savedUser = userRepository.save(user);
 
-        // If role is Pharmacist or Procurement and facilityId is provided, link the user to the specified facility
         Long linkedFacilityId = null;
-        boolean isFacilityRole = request.getRole() == User.Role.Pharmacist || request.getRole() == User.Role.Procurement;
-        if (isFacilityRole && request.getFacilityId() != null) {
-            Facility facility = facilityRepository.findById(request.getFacilityId())
-                    .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
+        Long linkedPharmacyId = null;
+        Facility facility = null;
+        Pharmacy pharmacy = null;
 
-            UserFacilityLink link = new UserFacilityLink();
-            link.setUser(savedUser);
-            link.setFacility(facility);
-            userFacilityLinkRepository.save(link);
-            linkedFacilityId = facility.getId();
+        boolean isScopedRole = request.getRole() == User.Role.Admin
+                || request.getRole() == User.Role.Pharmacist
+                || request.getRole() == User.Role.Procurement;
 
+        if (isScopedRole && request.getPharmacyId() != null) {
+            pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                    .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
+            UserPharmacyLink pLink = new UserPharmacyLink();
+            pLink.setUser(savedUser);
+            pLink.setPharmacy(pharmacy);
+            userPharmacyLinkRepository.save(pLink);
+            linkedPharmacyId = pharmacy.getId();
+            if (pharmacy.getFacility() != null) {
+                facility = pharmacy.getFacility();
+            }
+        }
+
+        if (isScopedRole && (request.getFacilityId() != null || facility != null)) {
+            if (request.getFacilityId() != null) {
+                facility = facilityRepository.findById(request.getFacilityId())
+                        .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
+            }
+            if (facility != null && !userFacilityLinkRepository.existsByUserIdAndFacilityId(savedUser.getId(), facility.getId())) {
+                UserFacilityLink fLink = new UserFacilityLink();
+                fLink.setUser(savedUser);
+                fLink.setFacility(facility);
+                userFacilityLinkRepository.save(fLink);
+            }
+            if (facility != null) {
+                linkedFacilityId = facility.getId();
+            }
+        }
+
+        if (facility != null) {
             auditLogService.logAction(
                     facility,
+                    pharmacy,
                     "Security & Access",
                     "USER_CREATED",
                     "User Account Created (" + savedUser.getUsername() + ")",
                     AuditLog.Severity.SUCCESS,
                     savedUser.getUsername(),
                     savedUser.getId(),
-                    "Created user account for '" + savedUser.getName() + "' (@" + savedUser.getUsername() + ") with role " + savedUser.getRole() + " assigned to facility '" + facility.getName() + "'.",
+                    "Created user account for '" + savedUser.getName() + "' (@" + savedUser.getUsername() + ") with role " + savedUser.getRole() +
+                            (pharmacy != null ? " assigned to pharmacy '" + pharmacy.getPharmacyName() + "'" : "") +
+                            " in facility '" + facility.getName() + "'.",
                     "Admin"
             );
         }
 
-        return mapToResponseDto(savedUser, linkedFacilityId, "User created successfully");
+        return mapToResponseDto(savedUser, linkedFacilityId, linkedPharmacyId, "User created successfully");
     }
 
     // 2. GET ALL USERS (SuperAdmin only)
@@ -108,12 +146,10 @@ public class UserService {
 
         User currentUser = getCurrentUser();
 
-        // SuperAdmin accounts cannot be updated by other SuperAdmins (unless updating themselves)
         if (targetUser.getRole() == User.Role.SuperAdmin && !targetUser.getId().equals(currentUser.getId())) {
             throw new AccessDeniedException("SuperAdmin accounts cannot be edited by other users");
         }
 
-        // Update fields
         targetUser.setName(request.getName());
         targetUser.setEmail(request.getEmail());
         targetUser.setPhone(request.getPhone());
@@ -130,7 +166,22 @@ public class UserService {
 
         User updatedUser = userRepository.save(targetUser);
 
-        // Update facility link if facilityId was provided
+        if (request.getPharmacyId() != null) {
+            Pharmacy pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                    .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
+
+            List<UserPharmacyLink> existingPLinks = userPharmacyLinkRepository.findByUserId(updatedUser.getId());
+            UserPharmacyLink pLink;
+            if (!existingPLinks.isEmpty()) {
+                pLink = existingPLinks.get(0);
+            } else {
+                pLink = new UserPharmacyLink();
+                pLink.setUser(updatedUser);
+            }
+            pLink.setPharmacy(pharmacy);
+            userPharmacyLinkRepository.save(pLink);
+        }
+
         if (request.getFacilityId() != null) {
             Facility facility = facilityRepository.findById(request.getFacilityId())
                     .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
@@ -153,9 +204,19 @@ public class UserService {
             targetFacility = links.get(0).getFacility();
         }
 
+        Pharmacy targetPharmacy = null;
+        List<UserPharmacyLink> pLinks = userPharmacyLinkRepository.findByUserId(updatedUser.getId());
+        if (!pLinks.isEmpty()) {
+            targetPharmacy = pLinks.get(0).getPharmacy();
+            if (targetFacility == null && targetPharmacy != null) {
+                targetFacility = targetPharmacy.getFacility();
+            }
+        }
+
         if (targetFacility != null) {
             auditLogService.logAction(
                     targetFacility,
+                    targetPharmacy,
                     "Security & Access",
                     "USER_UPDATED",
                     "User Account Updated (" + updatedUser.getUsername() + ")",
@@ -177,7 +238,6 @@ public class UserService {
         User targetUser = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found with id: " + id));
 
-        // SuperAdmin accounts can never be deleted
         if (targetUser.getRole() == User.Role.SuperAdmin) {
             throw new AccessDeniedException("SuperAdmin accounts cannot be deleted");
         }
@@ -188,13 +248,23 @@ public class UserService {
             targetFacility = links.get(0).getFacility();
         }
 
-        // Remove any facility links first
+        Pharmacy targetPharmacy = null;
+        List<UserPharmacyLink> pLinks = userPharmacyLinkRepository.findByUserId(targetUser.getId());
+        if (!pLinks.isEmpty()) {
+            targetPharmacy = pLinks.get(0).getPharmacy();
+            if (targetFacility == null && targetPharmacy != null) {
+                targetFacility = targetPharmacy.getFacility();
+            }
+        }
+
+        userPharmacyLinkRepository.deleteByUserId(id);
         userFacilityLinkRepository.deleteByUserId(id);
         userRepository.delete(targetUser);
 
         if (targetFacility != null) {
             auditLogService.logAction(
                     targetFacility,
+                    targetPharmacy,
                     "Security & Access",
                     "USER_DELETED",
                     "User Account Deleted (" + targetUser.getUsername() + ")",
@@ -207,7 +277,6 @@ public class UserService {
         }
     }
 
-    // Helper: Retrieve the currently authenticated User entity
     private User getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()) {
@@ -218,24 +287,25 @@ public class UserService {
                 .orElseThrow(() -> new AccessDeniedException("Authenticated user not found"));
     }
 
-    // Helper: Map User entity to UserResponseDto (queries facility link if present)
     private UserResponseDto mapToResponseDto(User user, String message) {
         List<UserFacilityLink> links = userFacilityLinkRepository.findByUserId(user.getId());
         Long facilityId = links.isEmpty() ? null : links.get(0).getFacility().getId();
-        List<Long> assignedFacilityIds = links.stream()
-                .map(link -> link.getFacility().getId())
-                .collect(Collectors.toList());
 
-        UserResponseDto dto = mapToResponseDto(user, facilityId, message);
-        dto.setAssignedFacilityIds(assignedFacilityIds);
-        return dto;
+        List<UserPharmacyLink> pLinks = userPharmacyLinkRepository.findByUserId(user.getId());
+        Long pharmacyId = pLinks.isEmpty() ? null : pLinks.get(0).getPharmacy().getId();
+
+        return mapToResponseDto(user, facilityId, pharmacyId, message);
     }
 
-    // Helper: Map User entity with known facilityId to UserResponseDto
-    private UserResponseDto mapToResponseDto(User user, Long facilityId, String message) {
+    private UserResponseDto mapToResponseDto(User user, Long facilityId, Long pharmacyId, String message) {
         List<Long> assignedFacilityIds = userFacilityLinkRepository.findByUserId(user.getId())
                 .stream()
                 .map(link -> link.getFacility().getId())
+                .collect(Collectors.toList());
+
+        List<Long> assignedPharmacyIds = userPharmacyLinkRepository.findByUserId(user.getId())
+                .stream()
+                .map(link -> link.getPharmacy().getId())
                 .collect(Collectors.toList());
 
         UserResponseDto dto = new UserResponseDto(
@@ -247,10 +317,12 @@ public class UserService {
                 user.getRole(),
                 user.getStatus(),
                 facilityId,
+                pharmacyId,
                 user.getCreatedAt(),
                 message
         );
         dto.setAssignedFacilityIds(assignedFacilityIds);
+        dto.setAssignedPharmacyIds(assignedPharmacyIds);
         return dto;
     }
 }

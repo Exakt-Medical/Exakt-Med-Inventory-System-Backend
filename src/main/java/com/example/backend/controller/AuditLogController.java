@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/audit-logs")
-@Tag(name = "Audit Logs", description = "Endpoints for reviewing facility activity logs, user transactions, and security audit trails")
+@Tag(name = "Audit Logs", description = "Endpoints for reviewing pharmacy activity logs, user transactions, and security audit trails")
 public class AuditLogController {
 
     private final AuditLogService auditLogService;
@@ -22,10 +22,10 @@ public class AuditLogController {
     }
 
     @GetMapping
-    @Operation(summary = "Get Audit Logs (Paginated)", description = "Queries system and inventory audit logs by facility with pagination, optional module, severity, and text search filters.")
+    @Operation(summary = "Get Audit Logs (Paginated)", description = "Queries system and inventory audit logs by pharmacy with pagination, optional module, severity, and text search filters.")
     public ResponseEntity<PageResponseDto<AuditLogResponseDto>> getAuditLogs(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId,
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
             @Parameter(description = "Module filter (e.g. INVENTORY, ORDERS, BATCHES, USERS)")
             @RequestParam(required = false) String module,
             @Parameter(description = "Severity filter (e.g. INFO, WARN, CRITICAL)")
@@ -40,14 +40,14 @@ public class AuditLogController {
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "DESC") String sortDir) {
-        return ResponseEntity.ok(auditLogService.getAuditLogs(facilityId, module, severity, search, page, size, sortBy, sortDir));
+        return ResponseEntity.ok(auditLogService.getAuditLogs(pharmacyId, module, severity, search, page, size, sortBy, sortDir));
     }
 
     @GetMapping("/summary")
-    @Operation(summary = "Get Audit Log Summary KPIs", description = "Returns aggregated facility-level audit log counts by severity for KPI overview cards.")
+    @Operation(summary = "Get Audit Log Summary KPIs", description = "Returns aggregated pharmacy-level audit log counts by severity for KPI overview cards.")
     public ResponseEntity<AuditLogSummaryDto> getAuditLogSummary(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(auditLogService.getAuditLogSummary(facilityId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(auditLogService.getAuditLogSummary(pharmacyId));
     }
 }

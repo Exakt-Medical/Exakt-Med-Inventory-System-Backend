@@ -35,15 +35,6 @@ public class Facility {
     private String name;
 
     @Column
-    private String contactPerson;
-
-    @Column
-    private String email;
-
-    @Column
-    private String phone;
-
-    @Column
     private String address;
 
     @Enumerated(EnumType.STRING)

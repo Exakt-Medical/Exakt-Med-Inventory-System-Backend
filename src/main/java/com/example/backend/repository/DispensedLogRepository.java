@@ -15,7 +15,7 @@ public interface DispensedLogRepository extends JpaRepository<DispensedLog, Long
 
     List<DispensedLog> findByStatusOrderByDispensedAtDesc(DispensedLog.Status status);
 
-    List<DispensedLog> findBySkuFacilityIdOrderByDispensedAtDesc(Long facilityId);
+    List<DispensedLog> findBySkuPharmacyIdOrderByDispensedAtDesc(Long pharmacyId);
 
-    List<DispensedLog> findBySkuFacilityIdAndStatusOrderByDispensedAtDesc(Long facilityId, DispensedLog.Status status);
+    List<DispensedLog> findBySkuPharmacyIdAndStatusOrderByDispensedAtDesc(Long pharmacyId, DispensedLog.Status status);
 }

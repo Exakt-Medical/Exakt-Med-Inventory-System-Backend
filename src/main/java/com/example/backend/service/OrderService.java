@@ -6,15 +6,15 @@ import com.example.backend.dto.order.OrderItemResponseDto;
 import com.example.backend.dto.order.OrderRequestDto;
 import com.example.backend.dto.order.OrderResponseDto;
 import com.example.backend.dto.order.OrderSummaryDto;
-import com.example.backend.entity.Facility;
+import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Order;
 import com.example.backend.entity.OrderedItem;
+import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.Sku;
 import com.example.backend.entity.Supplier;
-import com.example.backend.entity.AuditLog;
-import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.OrderRepository;
 import com.example.backend.repository.OrderedItemRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.RestockRequestRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.SupplierRepository;
@@ -41,7 +41,7 @@ public class OrderService {
     private final OrderedItemRepository orderedItemRepository;
     private final SupplierRepository supplierRepository;
     private final SkuRepository skuRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final RestockRequestRepository restockRequestRepository;
     private final AuditLogService auditLogService;
     private final FacilityAccessGuard facilityAccessGuard;
@@ -50,7 +50,7 @@ public class OrderService {
                         OrderedItemRepository orderedItemRepository,
                         SupplierRepository supplierRepository,
                         SkuRepository skuRepository,
-                        FacilityRepository facilityRepository,
+                        PharmacyRepository pharmacyRepository,
                         RestockRequestRepository restockRequestRepository,
                         AuditLogService auditLogService,
                         FacilityAccessGuard facilityAccessGuard) {
@@ -58,7 +58,7 @@ public class OrderService {
         this.orderedItemRepository = orderedItemRepository;
         this.supplierRepository = supplierRepository;
         this.skuRepository = skuRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.restockRequestRepository = restockRequestRepository;
         this.auditLogService = auditLogService;
         this.facilityAccessGuard = facilityAccessGuard;
@@ -68,14 +68,13 @@ public class OrderService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Procurement')")
     public OrderResponseDto createOrder(OrderRequestDto request) {
-        if (request.getFacilityId() == null) {
-            throw new RuntimeException("Facility ID is required");
+        if (request.getPharmacyId() == null) {
+            throw new RuntimeException("Pharmacy ID is required");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
-
-        Facility facility = facilityRepository.findById(request.getFacilityId())
-                .orElseThrow(() -> new RuntimeException("Facility not found with id: " + request.getFacilityId()));
+        facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
+        Pharmacy pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
 
         Supplier supplier = supplierRepository.findById(request.getSupplierId())
                 .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + request.getSupplierId()));
@@ -96,7 +95,7 @@ public class OrderService {
         LocalDateTime now = LocalDateTime.now();
 
         Order order = new Order();
-        order.setFacility(facility);
+        order.setPharmacy(pharmacy);
         order.setSupplier(supplier);
         order.setPurchaseOrderNum("PO-PENDING");
         order.setPriority(request.getPriority() != null && !request.getPriority().isBlank()
@@ -166,7 +165,7 @@ public class OrderService {
         }
 
         auditLogService.logAction(
-                facility,
+                pharmacy,
                 "Purchasing",
                 "PURCHASE_ORDER_CREATED",
                 "Purchase Order Created (" + savedOrder.getPurchaseOrderNum() + ")",
@@ -186,7 +185,7 @@ public class OrderService {
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement', 'Pharmacist')")
     public PageResponseDto<OrderResponseDto> getOrdersPaginated(
-            Long facilityId,
+            Long pharmacyId,
             String search,
             String status,
             String priority,
@@ -194,11 +193,11 @@ public class OrderService {
             int size,
             String sortBy,
             String sortDir) {
-        if (facilityId == null) {
-            throw new RuntimeException("Facility ID is required");
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         List<Order.Status> statuses = null;
         if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL")) {
@@ -249,7 +248,7 @@ public class OrderService {
                 : null;
 
         Page<Order> orderPage = orderRepository.findOrdersPaginated(
-                facilityId, statuses, priorityFilter, searchKeyword, pageable);
+                pharmacyId, statuses, priorityFilter, searchKeyword, pageable);
 
         if (orderPage.isEmpty()) {
             return PageResponseDto.from(orderPage.map(o -> mapToOrderResponseDto(o, Collections.emptyList())));
@@ -274,13 +273,13 @@ public class OrderService {
     // 2b. GET ORDER SUMMARY KPIS
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement', 'Pharmacist')")
-    public OrderSummaryDto getOrderSummary(Long facilityId) {
-        if (facilityId == null) {
-            throw new RuntimeException("Facility ID is required");
+    public OrderSummaryDto getOrderSummary(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required");
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
-        List<Object[]> results = orderRepository.countOrdersByStatus(facilityId);
+        List<Object[]> results = orderRepository.countOrdersByStatus(pharmacyId);
         long pending = 0;
         long approved = 0;
         long partiallyReceived = 0;
@@ -325,14 +324,14 @@ public class OrderService {
     // 2c. GET RECEIVABLE ORDERS (Lightweight list of Approved and Partially_Received orders for batch intake dropdown)
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement', 'Pharmacist')")
-    public List<OrderResponseDto> getReceivableOrders(Long facilityId) {
-        if (facilityId == null) {
-            throw new RuntimeException("Facility ID is required");
+    public List<OrderResponseDto> getReceivableOrders(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required");
         }
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         List<Order.Status> statuses = List.of(Order.Status.Approved, Order.Status.Partially_Received);
-        List<Order> orders = orderRepository.findByFacilityIdAndStatusInOrderByCreatedAtDesc(facilityId, statuses);
+        List<Order> orders = orderRepository.findReceivableOrdersByPharmacyId(pharmacyId, statuses);
 
         if (orders.isEmpty()) {
             return Collections.emptyList();
@@ -361,8 +360,8 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found with id: " + id));
 
-        if (order.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(order.getFacility().getId());
+        if (order.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(order.getPharmacy().getId());
         }
 
         List<OrderedItem> items = orderedItemRepository.findByOrderId(order.getId());
@@ -380,8 +379,8 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Order not found with id: " + id));
 
-        if (order.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(order.getFacility().getId());
+        if (order.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(order.getPharmacy().getId());
         }
 
         Order.Status newStatus = status != null ? status : Order.Status.Pending;
@@ -405,7 +404,7 @@ public class OrderService {
                 : (newStatus == Order.Status.Denied ? AuditLog.Severity.WARNING : AuditLog.Severity.INFO);
 
         auditLogService.logAction(
-                updatedOrder.getFacility(),
+                updatedOrder.getPharmacy(),
                 "Purchasing",
                 "PURCHASE_ORDER_" + newStatus.name().toUpperCase(),
                 "Purchase Order " + newStatus + " (" + updatedOrder.getPurchaseOrderNum() + ")",
@@ -456,9 +455,9 @@ public class OrderService {
         dto.setId(order.getId());
         dto.setPurchaseOrderNum(order.getPurchaseOrderNum());
         dto.setPoNumberFormatted(order.getPurchaseOrderNum());
-        if (order.getFacility() != null) {
-            dto.setFacilityId(order.getFacility().getId());
-            dto.setFacilityName(order.getFacility().getName());
+        if (order.getPharmacy() != null) {
+            dto.setPharmacyId(order.getPharmacy().getId());
+            dto.setPharmacyName(order.getPharmacy().getPharmacyName());
         }
         if (order.getSupplier() != null) {
             dto.setSupplierId(order.getSupplier().getId());

@@ -14,8 +14,8 @@ import java.time.LocalDateTime;
 public class SkuResponseDto {
 
     private Long id;
-    private Long facilityId;
-    private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Long medicineId;
     private String drugCode;
     private String drugDescription;

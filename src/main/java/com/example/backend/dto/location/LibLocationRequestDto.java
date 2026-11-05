@@ -2,6 +2,7 @@ package com.example.backend.dto.location;
 
 import com.example.backend.entity.LibLocation.StorageType;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -24,8 +25,9 @@ public class LibLocationRequestDto {
     @Schema(description = "Description or location details", example = "Dispensary counter - Top Shelf A-1")
     private String description;
 
-    @Schema(description = "Optional facility ID to scope this location to a specific branch/facility")
-    private Long facilityId;
+    @NotNull(message = "Pharmacy ID is required")
+    @Schema(description = "Pharmacy ID to scope this location to a specific pharmacy")
+    private Long pharmacyId;
 
     @Schema(description = "Whether the location is active for batch assignments", example = "true")
     private Boolean isActive;

@@ -14,8 +14,8 @@ import java.time.LocalDateTime;
 public class RestockResponseDto {
 
     private Long id;
-    private Long facilityId;
-    private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Long skuId;
     private String skuName;
     private String brandName;

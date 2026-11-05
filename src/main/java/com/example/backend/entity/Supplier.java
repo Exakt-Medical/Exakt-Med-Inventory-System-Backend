@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Table(
     name = "suppliers",
     uniqueConstraints = {
-        @UniqueConstraint(name = "uk_supplier_facility_email", columnNames = {"facilityId", "email"})
+        @UniqueConstraint(name = "uk_supplier_facility_pharmacy_email", columnNames = {"facilityId", "pharmacyId", "email"})
     }
 )
 @Getter
@@ -33,6 +33,10 @@ public class Supplier {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "facilityId", nullable = false)
     private Facility facility;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pharmacyId")
+    private Pharmacy pharmacy;
 
     @Column(nullable = false)
     private String name;

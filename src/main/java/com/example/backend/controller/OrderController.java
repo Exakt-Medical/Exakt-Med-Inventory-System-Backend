@@ -39,8 +39,8 @@ public class OrderController {
     @GetMapping
     @Operation(summary = "Get Orders Paginated", description = "Retrieves paginated purchase orders with search, status, and priority filters.")
     public ResponseEntity<PageResponseDto<OrderResponseDto>> getOrdersPaginated(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId,
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
             @Parameter(description = "Optional search query")
             @RequestParam(required = false) String search,
             @Parameter(description = "Optional status filter (e.g. ALL, Pending, Approved, Partially_Received, Received, Denied)")
@@ -56,25 +56,25 @@ public class OrderController {
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "DESC") String sortDir) {
         return ResponseEntity.ok(orderService.getOrdersPaginated(
-                facilityId, search, status, priority, page, size, sortBy, sortDir));
+                pharmacyId, search, status, priority, page, size, sortBy, sortDir));
     }
 
     // 2b. GET ORDER SUMMARY KPIS
     @GetMapping("/summary")
-    @Operation(summary = "Get Order Summary KPIs", description = "Returns aggregated status breakdown counts for the facility.")
+    @Operation(summary = "Get Order Summary KPIs", description = "Returns aggregated status breakdown counts for the pharmacy.")
     public ResponseEntity<OrderSummaryDto> getOrderSummary(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(orderService.getOrderSummary(facilityId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(orderService.getOrderSummary(pharmacyId));
     }
 
     // 2c. GET RECEIVABLE ORDERS
     @GetMapping("/receivable")
     @Operation(summary = "Get Receivable Orders", description = "Returns active Approved and Partially_Received purchase orders for batch intake.")
     public ResponseEntity<List<OrderResponseDto>> getReceivableOrders(
-            @Parameter(description = "Facility ID", required = true)
-            @RequestParam Long facilityId) {
-        return ResponseEntity.ok(orderService.getReceivableOrders(facilityId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(orderService.getReceivableOrders(pharmacyId));
     }
 
     // 3. GET ORDER BY ID

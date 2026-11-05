@@ -33,13 +33,13 @@ public class DispensedLogController {
 
     // 2. GET ALL DISPENSED LOGS
     @GetMapping
-    @Operation(summary = "Get All Dispensed Logs", description = "Retrieves dispensed logs optionally filtered by facility and status (Pending, Received).")
+    @Operation(summary = "Get All Dispensed Logs", description = "Retrieves dispensed logs filtered by pharmacy and optional status (Pending, Received).")
     public ResponseEntity<List<DispensedLogResponseDto>> getAllDispensedLogs(
-            @Parameter(description = "Optional facility ID filter")
-            @RequestParam(required = false) Long facilityId,
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
             @Parameter(description = "Optional status filter (Pending, Received)")
             @RequestParam(required = false) DispensedLog.Status status) {
-        return ResponseEntity.ok(dispensedLogService.getAllDispensedLogs(facilityId, status));
+        return ResponseEntity.ok(dispensedLogService.getAllDispensedLogs(pharmacyId, status));
     }
 
     // 3. GET DISPENSED LOG BY ID

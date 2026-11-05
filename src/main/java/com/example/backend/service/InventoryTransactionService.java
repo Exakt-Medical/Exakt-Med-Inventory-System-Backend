@@ -6,8 +6,8 @@ import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
 import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
 import com.example.backend.dto.inventory.InventoryTransactionSummaryDto;
 import com.example.backend.entity.*;
-import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.InventoryTransactionRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
@@ -28,16 +28,16 @@ public class InventoryTransactionService {
 
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final SkuRepository skuRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final FacilityAccessGuard facilityAccessGuard;
 
     public InventoryTransactionService(InventoryTransactionRepository inventoryTransactionRepository,
                                        SkuRepository skuRepository,
-                                       FacilityRepository facilityRepository,
+                                       PharmacyRepository pharmacyRepository,
                                        FacilityAccessGuard facilityAccessGuard) {
         this.inventoryTransactionRepository = inventoryTransactionRepository;
         this.skuRepository = skuRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.facilityAccessGuard = facilityAccessGuard;
     }
 
@@ -47,7 +47,7 @@ public class InventoryTransactionService {
      */
     @Transactional
     public InventoryTransaction recordTransaction(Sku sku,
-                                                  Facility facility,
+                                                  Pharmacy pharmacy,
                                                   Batch batch,
                                                   User user,
                                                   InventoryTransaction.Type type,
@@ -61,13 +61,13 @@ public class InventoryTransactionService {
                                                   String reason,
                                                   String notes,
                                                   LocalDateTime createdAt) {
-        return recordTransaction(sku, facility, batch, user, null, type, referenceNumber, batchNum, expiryDate,
+        return recordTransaction(sku, pharmacy, batch, user, null, type, referenceNumber, batchNum, expiryDate,
                 quantityIn, quantityOut, previousBalance, balanceAfter, reason, notes, createdAt);
     }
 
     @Transactional
     public InventoryTransaction recordTransaction(Sku sku,
-                                                  Facility facility,
+                                                  Pharmacy pharmacy,
                                                   Batch batch,
                                                   User user,
                                                   String authorizedBy,
@@ -85,11 +85,11 @@ public class InventoryTransactionService {
         if (sku == null) {
             throw new IllegalArgumentException("SKU is required to log an inventory transaction.");
         }
-        if (facility == null) {
-            facility = sku.getFacility();
+        if (pharmacy == null) {
+            pharmacy = sku.getPharmacy() != null ? sku.getPharmacy() : (batch != null ? batch.getPharmacy() : null);
         }
-        if (facility == null) {
-            throw new IllegalArgumentException("Facility is required to log an inventory transaction.");
+        if (pharmacy == null) {
+            throw new IllegalArgumentException("Pharmacy is required to log an inventory transaction.");
         }
 
         String resolvedAuthorizedBy = authorizedBy != null && !authorizedBy.isBlank() ? authorizedBy.trim() : null;
@@ -100,7 +100,7 @@ public class InventoryTransactionService {
         }
 
         InventoryTransaction tx = InventoryTransaction.builder()
-                .facility(facility)
+                .pharmacy(pharmacy)
                 .sku(sku)
                 .batch(batch)
                 .user(user)
@@ -121,28 +121,71 @@ public class InventoryTransactionService {
         return inventoryTransactionRepository.save(tx);
     }
 
+    // Legacy overloads accepting Facility parameter for backward compatibility
+    @Transactional
+    public InventoryTransaction recordTransaction(Sku sku,
+                                                  Facility facility,
+                                                  Pharmacy pharmacy,
+                                                  Batch batch,
+                                                  User user,
+                                                  InventoryTransaction.Type type,
+                                                  String referenceNumber,
+                                                  String batchNum,
+                                                  LocalDate expiryDate,
+                                                  Long quantityIn,
+                                                  Long quantityOut,
+                                                  Long previousBalance,
+                                                  Long balanceAfter,
+                                                  String reason,
+                                                  String notes,
+                                                  LocalDateTime createdAt) {
+        return recordTransaction(sku, pharmacy, batch, user, null, type, referenceNumber, batchNum, expiryDate,
+                quantityIn, quantityOut, previousBalance, balanceAfter, reason, notes, createdAt);
+    }
+
+    @Transactional
+    public InventoryTransaction recordTransaction(Sku sku,
+                                                  Facility facility,
+                                                  Pharmacy pharmacy,
+                                                  Batch batch,
+                                                  User user,
+                                                  String authorizedBy,
+                                                  InventoryTransaction.Type type,
+                                                  String referenceNumber,
+                                                  String batchNum,
+                                                  LocalDate expiryDate,
+                                                  Long quantityIn,
+                                                  Long quantityOut,
+                                                  Long previousBalance,
+                                                  Long balanceAfter,
+                                                  String reason,
+                                                  String notes,
+                                                  LocalDateTime createdAt) {
+        return recordTransaction(sku, pharmacy, batch, user, authorizedBy, type, referenceNumber, batchNum, expiryDate,
+                quantityIn, quantityOut, previousBalance, balanceAfter, reason, notes, createdAt);
+    }
+
     /**
      * Retrieves the complete chronological ledger for a SKU (Bin Card equivalent).
      */
     @Transactional(readOnly = true)
-    public InventoryLedgerResponseDto getLedgerForSku(Long facilityId, Long skuId, LocalDate startDate, LocalDate endDate) {
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is required.");
+    public InventoryLedgerResponseDto getLedgerForSku(Long pharmacyId, Long skuId, LocalDate startDate, LocalDate endDate) {
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is required.");
         }
         if (skuId == null) {
             throw new IllegalArgumentException("SKU ID is required.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
-
-        facilityRepository.findById(facilityId)
-                .orElseThrow(() -> new RuntimeException("Facility not found with id: " + facilityId));
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        pharmacyRepository.findById(pharmacyId)
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + pharmacyId));
 
         Sku sku = skuRepository.findById(skuId)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + skuId));
 
-        if (sku.getFacility() != null && !sku.getFacility().getId().equals(facilityId)) {
-            throw new RuntimeException("SKU " + skuId + " does not belong to facility " + facilityId);
+        if (sku.getPharmacy() != null && !sku.getPharmacy().getId().equals(pharmacyId)) {
+            throw new RuntimeException("SKU " + skuId + " does not belong to pharmacy " + pharmacyId);
         }
 
         List<InventoryTransaction> transactions;
@@ -150,10 +193,10 @@ public class InventoryTransactionService {
             LocalDateTime startDateTime = startDate.atStartOfDay();
             LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
             transactions = inventoryTransactionRepository
-                    .findByFacilityIdAndSkuIdAndCreatedAtBetweenOrderByCreatedAtDesc(facilityId, skuId, startDateTime, endDateTime);
+                    .findByPharmacyIdAndSkuIdAndCreatedAtBetweenOrderByCreatedAtDesc(pharmacyId, skuId, startDateTime, endDateTime);
         } else {
             transactions = inventoryTransactionRepository
-                    .findByFacilityIdAndSkuIdOrderByCreatedAtDesc(facilityId, skuId);
+                    .findByPharmacyIdAndSkuIdOrderByCreatedAtDesc(pharmacyId, skuId);
         }
 
         long totalReceived = 0;
@@ -213,13 +256,12 @@ public class InventoryTransactionService {
                 .build();
     }
 
-
     /**
-     * Retrieves transactions with server-side pagination, optional facility/sku scoping, and type/search filters.
+     * Retrieves transactions with server-side pagination, pharmacy/sku scoping, and type/search filters.
      */
     @Transactional(readOnly = true)
     public PageResponseDto<InventoryTransactionResponseDto> getTransactionsPaginated(
-            Long facilityId,
+            Long pharmacyId,
             Long skuId,
             List<InventoryTransaction.Type> types,
             String search,
@@ -228,11 +270,11 @@ public class InventoryTransactionService {
             String sortBy,
             String sortDir) {
 
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is strictly required to query inventory transactions.");
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is strictly required to query inventory transactions.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         Sort.Direction direction = "ASC".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
         String sortProperty = ("referenceNumber".equalsIgnoreCase(sortBy) || "transactionType".equalsIgnoreCase(sortBy))
@@ -246,25 +288,25 @@ public class InventoryTransactionService {
         String cleanSearch = (search != null && !search.trim().isBlank()) ? search.trim() : null;
 
         Page<InventoryTransaction> txPage = inventoryTransactionRepository.findTransactionsPaginated(
-                facilityId, skuId, filterTypes, cleanSearch, pageable);
+                pharmacyId, skuId, filterTypes, cleanSearch, pageable);
 
         Page<InventoryTransactionResponseDto> dtoPage = txPage.map(this::mapToDto);
         return PageResponseDto.from(dtoPage);
     }
 
     /**
-     * Retrieves aggregated transaction KPI metrics across the facility (optionally filtered by transaction types).
+     * Retrieves aggregated transaction KPI metrics across the pharmacy (optionally filtered by transaction types).
      */
     @Transactional(readOnly = true)
-    public InventoryTransactionSummaryDto getTransactionSummary(Long facilityId, List<InventoryTransaction.Type> types) {
-        if (facilityId == null) {
-            throw new IllegalArgumentException("Facility ID is strictly required to query inventory transaction summary.");
+    public InventoryTransactionSummaryDto getTransactionSummary(Long pharmacyId, List<InventoryTransaction.Type> types) {
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is strictly required to query inventory transaction summary.");
         }
 
-        facilityAccessGuard.verifyFacilityAccess(facilityId);
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         List<InventoryTransaction.Type> filterTypes = (types != null && !types.isEmpty()) ? types : null;
-        List<Object[]> rows = inventoryTransactionRepository.getTransactionSummaryByFacility(facilityId, filterTypes);
+        List<Object[]> rows = inventoryTransactionRepository.getTransactionSummaryByPharmacy(pharmacyId, filterTypes);
 
         long totalLogs = 0;
         long additionsUnits = 0;
@@ -295,7 +337,7 @@ public class InventoryTransactionService {
 
     public InventoryTransactionResponseDto mapToDto(InventoryTransaction tx) {
         Sku sku = tx.getSku();
-        Facility fac = tx.getFacility();
+        Pharmacy pharm = tx.getPharmacy() != null ? tx.getPharmacy() : (sku != null ? sku.getPharmacy() : null);
         User u = tx.getUser();
 
         String userName = "System";
@@ -323,8 +365,8 @@ public class InventoryTransactionService {
                 .genericName(gen)
                 .dosage(dosageStr)
                 .packagingUnit(sku != null ? sku.getPackagingUnit() : null)
-                .facilityId(fac != null ? fac.getId() : null)
-                .facilityName(fac != null ? fac.getName() : null)
+                .pharmacyId(pharm != null ? pharm.getId() : null)
+                .pharmacyName(pharm != null ? pharm.getPharmacyName() : null)
                 .userId(u != null ? u.getId() : null)
                 .userName(userName.trim())
                 .authorizedBy(userName.trim())

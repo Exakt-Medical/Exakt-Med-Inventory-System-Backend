@@ -8,8 +8,8 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "orders", indexes = {
-    @Index(name = "idx_orders_facility_created", columnList = "facilityId, createdAt"),
-    @Index(name = "idx_orders_facility_status", columnList = "facilityId, status"),
+    @Index(name = "idx_orders_pharmacy_created", columnList = "pharmacyId, createdAt"),
+    @Index(name = "idx_orders_pharmacy_status", columnList = "pharmacyId, status"),
     @Index(name = "idx_orders_po_num", columnList = "purchaseOrderNum")
 })
 @Getter
@@ -28,9 +28,9 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne
-    @JoinColumn(name = "facilityId")
-    private Facility facility;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pharmacyId", nullable = false)
+    private Pharmacy pharmacy;
 
     @ManyToOne
     @JoinColumn(name = "supplierId")

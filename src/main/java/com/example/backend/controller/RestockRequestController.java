@@ -26,7 +26,7 @@ public class RestockRequestController {
 
     // 1. CREATE RESTOCK REQUEST
     @PostMapping
-    @Operation(summary = "Create Restock Request", description = "Submits a replenishment request for an SKU from a pharmacy facility.")
+    @Operation(summary = "Create Restock Request", description = "Submits a replenishment request for an SKU from a pharmacy.")
     public ResponseEntity<RestockResponseDto> createRestockRequest(@Valid @RequestBody RestockRequestDto request) {
         RestockResponseDto response = restockRequestService.createRestockRequest(request);
         return new ResponseEntity<>(response, HttpStatus.CREATED);
@@ -34,13 +34,13 @@ public class RestockRequestController {
 
     // 2. GET ALL RESTOCK REQUESTS
     @GetMapping
-    @Operation(summary = "Get All Restock Requests", description = "Retrieves restock requests optionally filtered by facility ID and pending status.")
+    @Operation(summary = "Get All Restock Requests", description = "Retrieves restock requests filtered by pharmacy ID and pending status.")
     public ResponseEntity<List<RestockResponseDto>> getAllRestockRequests(
-            @Parameter(description = "Optional facility ID filter")
-            @RequestParam(required = false) Long facilityId,
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
             @Parameter(description = "Filter only pending requests")
             @RequestParam(required = false, defaultValue = "false") Boolean pendingOnly) {
-        return ResponseEntity.ok(restockRequestService.getAllRestockRequests(facilityId, pendingOnly));
+        return ResponseEntity.ok(restockRequestService.getAllRestockRequests(pharmacyId, pendingOnly));
     }
 
     // 3. GET RESTOCK REQUEST BY ID

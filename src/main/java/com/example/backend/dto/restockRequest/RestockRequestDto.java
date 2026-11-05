@@ -16,8 +16,8 @@ public class RestockRequestDto {
     @NotNull(message = "SKU ID is required")
     private Long skuId;
 
-    @NotNull(message = "Facility ID is required")
-    private Long facilityId;
+    @NotNull(message = "Pharmacy ID is required")
+    private Long pharmacyId;
 
     private Long userId;
 

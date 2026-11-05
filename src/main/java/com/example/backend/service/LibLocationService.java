@@ -2,11 +2,11 @@ package com.example.backend.service;
 
 import com.example.backend.dto.location.LibLocationRequestDto;
 import com.example.backend.dto.location.LibLocationResponseDto;
-import com.example.backend.entity.Facility;
 import com.example.backend.entity.LibLocation;
+import com.example.backend.entity.Pharmacy;
 import com.example.backend.repository.BatchRepository;
-import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.LibLocationRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -23,16 +22,16 @@ import java.util.stream.Collectors;
 public class LibLocationService {
 
     private final LibLocationRepository libLocationRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final BatchRepository batchRepository;
     private final FacilityAccessGuard facilityAccessGuard;
 
     public LibLocationService(LibLocationRepository libLocationRepository,
-                              FacilityRepository facilityRepository,
+                              PharmacyRepository pharmacyRepository,
                               @Lazy BatchRepository batchRepository,
                               FacilityAccessGuard facilityAccessGuard) {
         this.libLocationRepository = libLocationRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.batchRepository = batchRepository;
         this.facilityAccessGuard = facilityAccessGuard;
     }
@@ -45,12 +44,12 @@ public class LibLocationService {
             throw new RuntimeException("Request body cannot be null.");
         }
 
-        Facility facility = null;
-        if (request.getFacilityId() != null) {
-            facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
-            facility = facilityRepository.findById(request.getFacilityId())
-                    .orElseThrow(() -> new RuntimeException("Facility not found with ID: " + request.getFacilityId()));
+        if (request.getPharmacyId() == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
         }
+        facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
+        Pharmacy pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with ID: " + request.getPharmacyId()));
 
         LibLocation.StorageType storageType = request.getStorageType() != null
                 ? request.getStorageType()
@@ -59,21 +58,18 @@ public class LibLocationService {
         String code;
         if (request.getCode() != null && !request.getCode().trim().isEmpty()) {
             code = request.getCode().trim().toUpperCase();
-            boolean exists = facility != null
-                    ? libLocationRepository.existsByCodeIgnoreCaseAndFacilityId(code, facility.getId())
-                    : libLocationRepository.existsByCodeIgnoreCase(code);
-            if (exists) {
-                throw new RuntimeException("Location code '" + code + "' already exists.");
+            if (libLocationRepository.existsByCodeIgnoreCaseAndPharmacyId(code, pharmacy.getId())) {
+                throw new RuntimeException("Location code '" + code + "' already exists in this pharmacy.");
             }
         } else {
-            code = generateNextCode(storageType, facility != null ? facility.getId() : null);
+            code = generateNextCode(storageType, pharmacy.getId());
         }
 
         LibLocation location = LibLocation.builder()
                 .code(code)
                 .storageType(storageType)
                 .description(request.getDescription() != null ? request.getDescription().trim() : null)
-                .facility(facility)
+                .pharmacy(pharmacy)
                 .isActive(request.getIsActive() != null ? request.getIsActive() : true)
                 .build();
 
@@ -81,27 +77,18 @@ public class LibLocationService {
         return mapToDto(saved);
     }
 
-    // 2. GET ALL LOCATIONS (Filtered by facility, active status, storage type)
+    // 2. GET ALL LOCATIONS (Filtered by pharmacy, active status, storage type)
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Pharmacist')")
-    public List<LibLocationResponseDto> getAllLocations(Long facilityId, Boolean activeOnly, LibLocation.StorageType storageType) {
-        List<LibLocation> locations;
-
-        if (facilityId != null) {
-            facilityAccessGuard.verifyFacilityAccess(facilityId);
-            locations = (activeOnly != null && activeOnly)
-                    ? libLocationRepository.findByFacilityIdAndIsActiveTrue(facilityId)
-                    : libLocationRepository.findByFacilityId(facilityId);
-        } else {
-            Set<Long> accessibleFacilityIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
-            List<LibLocation> rawLocations = (activeOnly != null && activeOnly)
-                    ? libLocationRepository.findByIsActiveTrue()
-                    : libLocationRepository.findAll();
-            locations = rawLocations.stream()
-                    .filter(loc -> accessibleFacilityIds == null ||
-                            (loc.getFacility() != null && accessibleFacilityIds.contains(loc.getFacility().getId())))
-                    .collect(Collectors.toList());
+    public List<LibLocationResponseDto> getAllLocations(Long pharmacyId, Boolean activeOnly, LibLocation.StorageType storageType) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
         }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
+        List<LibLocation> locations = (activeOnly != null && activeOnly)
+                ? libLocationRepository.findByPharmacyIdAndIsActiveTrue(pharmacyId)
+                : libLocationRepository.findByPharmacyId(pharmacyId);
 
         return locations.stream()
                 .filter(loc -> storageType == null || loc.getStorageType() == storageType)
@@ -115,8 +102,8 @@ public class LibLocationService {
     public LibLocationResponseDto getLocationById(Long id) {
         LibLocation location = libLocationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Location not found with ID: " + id));
-        if (location.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(location.getFacility().getId());
+        if (location.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(location.getPharmacy().getId());
         }
         return mapToDto(location);
     }
@@ -127,23 +114,23 @@ public class LibLocationService {
     public LibLocationResponseDto updateLocation(Long id, LibLocationRequestDto request) {
         LibLocation location = libLocationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Location not found with ID: " + id));
-        if (location.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(location.getFacility().getId());
+        if (location.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(location.getPharmacy().getId());
         }
 
-        Facility facility = location.getFacility();
-        if (request.getFacilityId() != null) {
-            facilityAccessGuard.verifyFacilityAccess(request.getFacilityId());
-            facility = facilityRepository.findById(request.getFacilityId())
-                    .orElseThrow(() -> new RuntimeException("Facility not found with ID: " + request.getFacilityId()));
-            location.setFacility(facility);
+        Pharmacy pharmacy = location.getPharmacy();
+        if (request.getPharmacyId() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
+            pharmacy = pharmacyRepository.findById(request.getPharmacyId())
+                    .orElseThrow(() -> new RuntimeException("Pharmacy not found with ID: " + request.getPharmacyId()));
+            location.setPharmacy(pharmacy);
         }
 
         if (request.getCode() != null && !request.getCode().trim().isEmpty()) {
             String newCode = request.getCode().trim().toUpperCase();
             if (!newCode.equalsIgnoreCase(location.getCode())) {
-                boolean exists = facility != null
-                        ? libLocationRepository.existsByCodeIgnoreCaseAndFacilityId(newCode, facility.getId())
+                boolean exists = pharmacy != null
+                        ? libLocationRepository.existsByCodeIgnoreCaseAndPharmacyId(newCode, pharmacy.getId())
                         : libLocationRepository.existsByCodeIgnoreCase(newCode);
                 if (exists) {
                     throw new RuntimeException("Location code '" + newCode + "' already exists.");
@@ -174,8 +161,8 @@ public class LibLocationService {
     public void deleteLocation(Long id) {
         LibLocation location = libLocationRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Location not found with ID: " + id));
-        if (location.getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(location.getFacility().getId());
+        if (location.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(location.getPharmacy().getId());
         }
 
         boolean isReferenced = batchRepository.existsByLocationId(id);
@@ -189,11 +176,14 @@ public class LibLocationService {
     }
 
     // 6. GENERATE CODE HELPER
-    public String generateNextCode(LibLocation.StorageType storageType, Long facilityId) {
+    public String generateNextCode(LibLocation.StorageType storageType, Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required to generate location code.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
         String prefix = resolvePrefix(storageType);
-        List<String> existingCodes = facilityId != null
-                ? libLocationRepository.findCodesByPrefixAndFacilityId(prefix, facilityId)
-                : libLocationRepository.findCodesByPrefix(prefix);
+        List<String> existingCodes = libLocationRepository.findCodesByPrefixAndPharmacyId(prefix, pharmacyId);
 
         int maxSeq = 0;
         Pattern pattern = Pattern.compile("^" + Pattern.quote(prefix) + "-(\\d+)$", Pattern.CASE_INSENSITIVE);
@@ -240,8 +230,8 @@ public class LibLocationService {
                 .code(location.getCode())
                 .storageType(location.getStorageType())
                 .description(location.getDescription())
-                .facilityId(location.getFacility() != null ? location.getFacility().getId() : null)
-                .facilityName(location.getFacility() != null ? location.getFacility().getName() : null)
+                .pharmacyId(location.getPharmacy() != null ? location.getPharmacy().getId() : null)
+                .pharmacyName(location.getPharmacy() != null ? location.getPharmacy().getPharmacyName() : null)
                 .isActive(location.getIsActive())
                 .createdAt(location.getCreatedAt())
                 .updatedAt(location.getUpdatedAt())

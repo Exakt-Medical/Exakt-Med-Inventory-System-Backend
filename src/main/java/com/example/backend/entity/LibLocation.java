@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "lib_locations", indexes = {
-    @Index(name = "idx_lib_loc_facility", columnList = "facility_id"),
+    @Index(name = "idx_lib_loc_pharmacy", columnList = "pharmacy_id"),
     @Index(name = "idx_lib_loc_code", columnList = "code")
 })
 @Getter
@@ -34,8 +34,8 @@ public class LibLocation {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "facility_id")
-    private Facility facility;
+    @JoinColumn(name = "pharmacy_id", nullable = false)
+    private Pharmacy pharmacy;
 
     @Column(nullable = false, length = 50)
     private String code; // e.g., "SHELF-A1", "REF-01"

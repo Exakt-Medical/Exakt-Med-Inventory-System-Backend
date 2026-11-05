@@ -13,8 +13,8 @@ import lombok.Setter;
 @AllArgsConstructor
 public class SkuRequestDto {
 
-    @NotNull(message = "Facility ID is required")
-    private Long facilityId;
+    @NotNull(message = "Pharmacy ID is required")
+    private Long pharmacyId;
 
     @NotNull(message = "Medicine ID is required")
     private Long medicineId;

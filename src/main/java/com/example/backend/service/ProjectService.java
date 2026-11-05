@@ -1,11 +1,13 @@
 package com.example.backend.service;
 
 import com.example.backend.dto.facility.FacilityResponseDto;
+import com.example.backend.dto.pharmacy.PharmacyResponseDto;
 import com.example.backend.dto.project.ProjectRequestDto;
 import com.example.backend.dto.project.ProjectResponseDto;
 import com.example.backend.entity.Facility;
 import com.example.backend.entity.Project;
 import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.ProjectRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -19,10 +21,17 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
+    private final PharmacyService pharmacyService;
 
-    public ProjectService(ProjectRepository projectRepository, FacilityRepository facilityRepository) {
+    public ProjectService(ProjectRepository projectRepository,
+                          FacilityRepository facilityRepository,
+                          PharmacyRepository pharmacyRepository,
+                          PharmacyService pharmacyService) {
         this.projectRepository = projectRepository;
         this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
+        this.pharmacyService = pharmacyService;
     }
 
     // 1. CREATE PROJECT (SuperAdmin only)
@@ -43,7 +52,7 @@ public class ProjectService {
         return mapToResponseDto(savedProject, "Project Created Successfully");
     }
 
-    // 2. GET ALL PROJECTS (SuperAdmin only) - Includes associated facilities
+    // 2. GET ALL PROJECTS (SuperAdmin only) - Includes associated facilities and pharmacies
     @PreAuthorize("hasRole('SuperAdmin')")
     public List<ProjectResponseDto> getAllProjects() {
         return projectRepository.findAll()
@@ -103,22 +112,26 @@ public class ProjectService {
         return response;
     }
 
-    // Helper: Map Facility entity to FacilityResponseDto
+    // Helper: Map Facility entity to FacilityResponseDto with nested pharmacies
     private FacilityResponseDto mapFacilityToDto(Facility f) {
-        return new FacilityResponseDto(
+        FacilityResponseDto dto = new FacilityResponseDto(
                 f.getId(),
                 f.getProject() != null ? f.getProject().getId() : null,
                 f.getProject() != null ? f.getProject().getName() : null,
                 f.getFacilityCode(),
                 f.getName(),
-                f.getContactPerson(),
-                f.getEmail(),
-                f.getPhone(),
                 f.getAddress(),
                 f.getStatus(),
                 f.getCreatedAt(),
                 f.getUpdatedAt(),
                 null
         );
+
+        List<PharmacyResponseDto> pharmacies = pharmacyRepository.findByFacilityId(f.getId())
+                .stream()
+                .map(p -> pharmacyService.mapToResponseDto(p, null))
+                .collect(Collectors.toList());
+        dto.setPharmacies(pharmacies);
+        return dto;
     }
 }

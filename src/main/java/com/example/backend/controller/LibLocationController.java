@@ -35,15 +35,15 @@ public class LibLocationController {
 
     // 2. GET ALL LOCATIONS
     @GetMapping
-    @Operation(summary = "Get All Storage Locations", description = "Returns storage locations, optionally filtered by facility, active status, or storage type.")
+    @Operation(summary = "Get All Storage Locations", description = "Returns storage locations filtered by pharmacy, active status, or storage type.")
     public ResponseEntity<List<LibLocationResponseDto>> getAllLocations(
-            @Parameter(description = "Optional facility ID filter")
-            @RequestParam(required = false) Long facilityId,
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
             @Parameter(description = "Filter only active locations (default: true for dropdowns)")
             @RequestParam(required = false, defaultValue = "false") Boolean activeOnly,
             @Parameter(description = "Filter by storage condition type")
             @RequestParam(required = false) LibLocation.StorageType storageType) {
-        return ResponseEntity.ok(libLocationService.getAllLocations(facilityId, activeOnly, storageType));
+        return ResponseEntity.ok(libLocationService.getAllLocations(pharmacyId, activeOnly, storageType));
     }
 
     // 3. GET LOCATION BY ID
@@ -81,8 +81,8 @@ public class LibLocationController {
     public ResponseEntity<String> suggestNextCode(
             @Parameter(description = "Storage condition type", required = true)
             @RequestParam LibLocation.StorageType storageType,
-            @Parameter(description = "Optional facility ID")
-            @RequestParam(required = false) Long facilityId) {
-        return ResponseEntity.ok(libLocationService.generateNextCode(storageType, facilityId));
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(libLocationService.generateNextCode(storageType, pharmacyId));
     }
 }

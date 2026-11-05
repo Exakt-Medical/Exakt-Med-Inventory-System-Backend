@@ -26,9 +26,9 @@ public class OneRxDispenseRequestDto {
     @JsonProperty("rx_number")
     private String rxNumber;
 
-    @NotBlank(message = "Field 'facility_code' is required.")
-    @JsonProperty("facility_code")
-    private String facilityCode;
+    @NotBlank(message = "Field 'pharmacy_code' is required.")
+    @JsonProperty("pharmacy_code")
+    private String pharmacyCode;
 
     private String dispensedBy;
 

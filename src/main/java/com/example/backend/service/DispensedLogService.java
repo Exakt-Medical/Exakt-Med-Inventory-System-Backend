@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,17 +35,17 @@ public class DispensedLogService {
         DispensedLog log = dispensedLogRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Dispensed log not found with id: " + id));
 
-        if (log.getSku() != null && log.getSku().getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(log.getSku().getFacility().getId());
+        if (log.getSku() != null && log.getSku().getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(log.getSku().getPharmacy().getId());
         }
 
         log.setStatus(DispensedLog.Status.Received);
         log.setReceivedAt(LocalDateTime.now());
         DispensedLog saved = dispensedLogRepository.save(log);
 
-        if (saved.getSku() != null && saved.getSku().getFacility() != null) {
+        if (saved.getSku() != null && saved.getSku().getPharmacy() != null) {
             auditLogService.logAction(
-                    saved.getSku().getFacility(),
+                    saved.getSku().getPharmacy(),
                     "Dispense",
                     "DISPENSE_CONFIRMED",
                     "Dispensed Medicine Received by Patient",
@@ -65,31 +64,20 @@ public class DispensedLogService {
         return mapToResponseDto(saved);
     }
 
-    // 2. GET ALL DISPENSED LOGS (Optional facilityId and status filter)
+    // 2. GET ALL DISPENSED LOGS (Required pharmacyId, optional status filter)
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
-    public List<DispensedLogResponseDto> getAllDispensedLogs(Long facilityId, DispensedLog.Status status) {
+    public List<DispensedLogResponseDto> getAllDispensedLogs(Long pharmacyId, DispensedLog.Status status) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
         List<DispensedLog> logs;
-        if (facilityId != null) {
-            facilityAccessGuard.verifyFacilityAccess(facilityId);
-            if (status != null) {
-                logs = dispensedLogRepository.findBySkuFacilityIdAndStatusOrderByDispensedAtDesc(facilityId, status);
-            } else {
-                logs = dispensedLogRepository.findBySkuFacilityIdOrderByDispensedAtDesc(facilityId);
-            }
+        if (status != null) {
+            logs = dispensedLogRepository.findBySkuPharmacyIdAndStatusOrderByDispensedAtDesc(pharmacyId, status);
         } else {
-            Set<Long> accessibleIds = facilityAccessGuard.getAccessibleFacilityIdsOrNullForSuperAdmin();
-            List<DispensedLog> all = (status != null)
-                    ? dispensedLogRepository.findByStatusOrderByDispensedAtDesc(status)
-                    : dispensedLogRepository.findAllByOrderByDispensedAtDesc();
-            if (accessibleIds != null) {
-                logs = all.stream()
-                        .filter(l -> l.getSku() != null && l.getSku().getFacility() != null
-                                && accessibleIds.contains(l.getSku().getFacility().getId()))
-                        .collect(Collectors.toList());
-            } else {
-                logs = all;
-            }
+            logs = dispensedLogRepository.findBySkuPharmacyIdOrderByDispensedAtDesc(pharmacyId);
         }
         return logs.stream().map(this::mapToResponseDto).collect(Collectors.toList());
     }
@@ -100,8 +88,8 @@ public class DispensedLogService {
     public DispensedLogResponseDto getDispensedLogById(Long id) {
         DispensedLog log = dispensedLogRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Dispensed log not found with id: " + id));
-        if (log.getSku() != null && log.getSku().getFacility() != null) {
-            facilityAccessGuard.verifyFacilityAccess(log.getSku().getFacility().getId());
+        if (log.getSku() != null && log.getSku().getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(log.getSku().getPharmacy().getId());
         }
         return mapToResponseDto(log);
     }
@@ -124,9 +112,9 @@ public class DispensedLogService {
             if (log.getSku().getLibMedicine() != null) {
                 dto.setGenericName(log.getSku().getLibMedicine().getDrugDescription());
             }
-            if (log.getSku().getFacility() != null) {
-                dto.setFacilityId(log.getSku().getFacility().getId());
-                dto.setFacilityName(log.getSku().getFacility().getName());
+            if (log.getSku().getPharmacy() != null) {
+                dto.setPharmacyId(log.getSku().getPharmacy().getId());
+                dto.setPharmacyName(log.getSku().getPharmacy().getPharmacyName());
             }
         }
 

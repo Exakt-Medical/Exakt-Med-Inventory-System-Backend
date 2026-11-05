@@ -34,11 +34,13 @@ public class SupplierController {
 
     // 2. GET ALL SUPPLIERS
     @GetMapping
-    @Operation(summary = "Get All Suppliers", description = "Retrieves all suppliers, optionally filtered by assigned facility.")
+    @Operation(summary = "Get All Suppliers", description = "Retrieves all suppliers, optionally filtered by assigned facility or pharmacy.")
     public ResponseEntity<List<SupplierResponseDto>> getAllSuppliers(
             @Parameter(description = "Optional facility ID filter")
-            @RequestParam(required = false) Long facilityId) {
-        return ResponseEntity.ok(supplierService.getAllSuppliers(facilityId));
+            @RequestParam(required = false) Long facilityId,
+            @Parameter(description = "Optional pharmacy ID filter")
+            @RequestParam(required = false) Long pharmacyId) {
+        return ResponseEntity.ok(supplierService.getAllSuppliers(facilityId, pharmacyId));
     }
 
     // 3. GET SUPPLIER BY ID

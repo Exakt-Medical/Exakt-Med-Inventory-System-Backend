@@ -14,24 +14,33 @@ import java.util.List;
 @Repository
 public interface InventoryTransactionRepository extends JpaRepository<InventoryTransaction, Long> {
 
-    boolean existsByFacilityIdAndTransactionTypeAndReferenceNumberIgnoreCase(
-            Long facilityId,
+    boolean existsByPharmacyIdAndTransactionTypeAndReferenceNumberIgnoreCase(
+            Long pharmacyId,
             InventoryTransaction.Type transactionType,
             String referenceNumber);
 
-    List<InventoryTransaction> findByFacilityIdAndSkuIdOrderByCreatedAtDesc(Long facilityId, Long skuId);
+    @Query("SELECT tx FROM InventoryTransaction tx WHERE " +
+           "tx.pharmacy.id = :pharmacyId AND " +
+           "tx.sku.id = :skuId " +
+           "ORDER BY tx.createdAt DESC")
+    List<InventoryTransaction> findByPharmacyIdAndSkuIdOrderByCreatedAtDesc(
+            @Param("pharmacyId") Long pharmacyId,
+            @Param("skuId") Long skuId);
 
-    List<InventoryTransaction> findByFacilityIdAndSkuIdOrderByCreatedAtAsc(Long facilityId, Long skuId);
-
-    List<InventoryTransaction> findByFacilityIdAndSkuIdAndCreatedAtBetweenOrderByCreatedAtDesc(
-            Long facilityId, Long skuId, LocalDateTime start, LocalDateTime end);
-
-    List<InventoryTransaction> findByFacilityIdAndSkuIdAndCreatedAtBetweenOrderByCreatedAtAsc(
-            Long facilityId, Long skuId, LocalDateTime start, LocalDateTime end);
+    @Query("SELECT tx FROM InventoryTransaction tx WHERE " +
+           "tx.pharmacy.id = :pharmacyId AND " +
+           "tx.sku.id = :skuId AND " +
+           "tx.createdAt BETWEEN :start AND :end " +
+           "ORDER BY tx.createdAt DESC")
+    List<InventoryTransaction> findByPharmacyIdAndSkuIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+            @Param("pharmacyId") Long pharmacyId,
+            @Param("skuId") Long skuId,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
 
     @Query(value = "SELECT tx FROM InventoryTransaction tx " +
            "LEFT JOIN tx.sku s " +
-           "WHERE (:facilityId IS NULL OR tx.facility.id = :facilityId) " +
+           "WHERE tx.pharmacy.id = :pharmacyId " +
            "AND (:skuId IS NULL OR tx.sku.id = :skuId) " +
            "AND (:types IS NULL OR tx.transactionType IN :types) " +
            "AND (:search IS NULL OR :search = '' OR " +
@@ -42,7 +51,7 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
            "     LOWER(tx.reason) LIKE LOWER(CONCAT('%', :search, '%')))",
            countQuery = "SELECT COUNT(tx) FROM InventoryTransaction tx " +
            "LEFT JOIN tx.sku s " +
-           "WHERE (:facilityId IS NULL OR tx.facility.id = :facilityId) " +
+           "WHERE tx.pharmacy.id = :pharmacyId " +
            "AND (:skuId IS NULL OR tx.sku.id = :skuId) " +
            "AND (:types IS NULL OR tx.transactionType IN :types) " +
            "AND (:search IS NULL OR :search = '' OR " +
@@ -52,7 +61,7 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
            "     LOWER(s.brandName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "     LOWER(tx.reason) LIKE LOWER(CONCAT('%', :search, '%')))")
     Page<InventoryTransaction> findTransactionsPaginated(
-            @Param("facilityId") Long facilityId,
+            @Param("pharmacyId") Long pharmacyId,
             @Param("skuId") Long skuId,
             @Param("types") List<InventoryTransaction.Type> types,
             @Param("search") String search,
@@ -65,9 +74,9 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
            "COALESCE(SUM(CASE WHEN tx.quantityOut IS NOT NULL AND tx.quantityOut > 0 THEN tx.quantityOut ELSE 0L END), 0L), " +
            "COALESCE(SUM(CASE WHEN tx.quantityOut IS NOT NULL AND tx.quantityOut > 0 THEN 1L ELSE 0L END), 0L) " +
            "FROM InventoryTransaction tx " +
-           "WHERE tx.facility.id = :facilityId " +
+           "WHERE tx.pharmacy.id = :pharmacyId " +
            "AND (:types IS NULL OR tx.transactionType IN :types)")
-    List<Object[]> getTransactionSummaryByFacility(
-            @Param("facilityId") Long facilityId,
+    List<Object[]> getTransactionSummaryByPharmacy(
+            @Param("pharmacyId") Long pharmacyId,
             @Param("types") List<InventoryTransaction.Type> types);
 }

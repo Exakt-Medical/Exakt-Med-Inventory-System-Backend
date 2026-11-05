@@ -2,9 +2,12 @@ package com.example.backend.service;
 
 import com.example.backend.dto.facility.FacilityRequestDto;
 import com.example.backend.dto.facility.FacilityResponseDto;
+import com.example.backend.dto.pharmacy.PharmacyResponseDto;
+import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Facility;
 import com.example.backend.entity.Project;
 import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.ProjectRepository;
 import com.example.backend.repository.UserFacilityLinkRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -14,23 +17,27 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.example.backend.entity.AuditLog;
-
 @Service
 public class FacilityService {
 
     private final FacilityRepository facilityRepository;
     private final ProjectRepository projectRepository;
     private final UserFacilityLinkRepository userFacilityLinkRepository;
+    private final PharmacyRepository pharmacyRepository;
+    private final PharmacyService pharmacyService;
     private final AuditLogService auditLogService;
 
     public FacilityService(FacilityRepository facilityRepository,
                            ProjectRepository projectRepository,
                            UserFacilityLinkRepository userFacilityLinkRepository,
+                           PharmacyRepository pharmacyRepository,
+                           PharmacyService pharmacyService,
                            AuditLogService auditLogService) {
         this.facilityRepository = facilityRepository;
         this.projectRepository = projectRepository;
         this.userFacilityLinkRepository = userFacilityLinkRepository;
+        this.pharmacyRepository = pharmacyRepository;
+        this.pharmacyService = pharmacyService;
         this.auditLogService = auditLogService;
     }
 
@@ -38,7 +45,6 @@ public class FacilityService {
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin')")
     public FacilityResponseDto createFacility(FacilityRequestDto request) {
-        // Validate project exists
         Project project = projectRepository.findById(request.getProjectId())
                 .orElseThrow(() -> new RuntimeException("Project not found with id: " + request.getProjectId()));
 
@@ -51,9 +57,6 @@ public class FacilityService {
         facility.setProject(project);
         facility.setFacilityCode(trimmedCode);
         facility.setName(request.getName().trim());
-        facility.setContactPerson(request.getContactPerson());
-        facility.setEmail(request.getEmail());
-        facility.setPhone(request.getPhone());
         facility.setAddress(request.getAddress());
         facility.setStatus(request.getStatus() != null ? request.getStatus() : Facility.Status.Active);
 
@@ -100,7 +103,6 @@ public class FacilityService {
                     throw new RuntimeException("Facility code '" + trimmedCode + "' already exists");
                 });
 
-        // If project reference changed
         if (!existingFacility.getProject().getId().equals(request.getProjectId())) {
             Project project = projectRepository.findById(request.getProjectId())
                     .orElseThrow(() -> new RuntimeException("Project not found with id: " + request.getProjectId()));
@@ -109,9 +111,6 @@ public class FacilityService {
 
         existingFacility.setFacilityCode(trimmedCode);
         existingFacility.setName(request.getName().trim());
-        existingFacility.setContactPerson(request.getContactPerson());
-        existingFacility.setEmail(request.getEmail());
-        existingFacility.setPhone(request.getPhone());
         existingFacility.setAddress(request.getAddress());
         if (request.getStatus() != null) {
             existingFacility.setStatus(request.getStatus());
@@ -127,7 +126,7 @@ public class FacilityService {
                 AuditLog.Severity.INFO,
                 updatedFacility.getName(),
                 updatedFacility.getId(),
-                "Updated profile and contact information for facility '" + updatedFacility.getName() + "'.",
+                "Updated profile for facility '" + updatedFacility.getName() + "'.",
                 "Admin"
         );
 
@@ -144,7 +143,7 @@ public class FacilityService {
     }
 
     // Helper: Map Facility entity to FacilityResponseDto
-    private FacilityResponseDto mapToResponseDto(Facility facility, String message) {
+    public FacilityResponseDto mapToResponseDto(Facility facility, String message) {
         FacilityResponseDto response = new FacilityResponseDto();
         response.setId(facility.getId());
         if (facility.getProject() != null) {
@@ -153,9 +152,6 @@ public class FacilityService {
         }
         response.setFacilityCode(facility.getFacilityCode());
         response.setName(facility.getName());
-        response.setContactPerson(facility.getContactPerson());
-        response.setEmail(facility.getEmail());
-        response.setPhone(facility.getPhone());
         response.setAddress(facility.getAddress());
         response.setStatus(facility.getStatus());
         response.setCreatedAt(facility.getCreatedAt());
@@ -167,6 +163,12 @@ public class FacilityService {
                 .map(link -> link.getUser().getId())
                 .collect(Collectors.toList());
         response.setAssignedUserIds(assignedUserIds);
+
+        List<PharmacyResponseDto> pharmacies = pharmacyRepository.findByFacilityId(facility.getId())
+                .stream()
+                .map(p -> pharmacyService.mapToResponseDto(p, null))
+                .collect(Collectors.toList());
+        response.setPharmacies(pharmacies);
 
         return response;
     }

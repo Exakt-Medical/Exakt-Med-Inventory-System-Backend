@@ -25,9 +25,9 @@ public class DashboardController {
     @GetMapping("/pharmacist")
     @Operation(summary = "Get Pharmacist Dashboard Data", description = "Retrieves real-time pharmacy metrics including total inventory units, critically low stock count, near expiry count, unverified stock, category distributions, health bars, and urgent alerts.")
     public ResponseEntity<PharmacistDashboardResponseDto> getPharmacistDashboard(
-            @Parameter(description = "Optional facility ID filter. If omitted, aggregates across all facilities assigned to the user.")
-            @RequestParam(required = false) Long facilityId) {
-        PharmacistDashboardResponseDto response = dashboardService.getPharmacistDashboard(facilityId);
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        PharmacistDashboardResponseDto response = dashboardService.getPharmacistDashboard(pharmacyId);
         return ResponseEntity.ok(response);
     }
 
@@ -35,9 +35,9 @@ public class DashboardController {
     @GetMapping("/procurement")
     @Operation(summary = "Get Procurement Dashboard Data", description = "Retrieves real-time procurement KPIs including pending requests, low stock alert count, POs in transit, monthly spend, priority restock SKUs, and recent order requests.")
     public ResponseEntity<ProcurementDashboardResponseDto> getProcurementDashboard(
-            @Parameter(description = "Optional facility ID filter. If omitted, aggregates across all facilities assigned to the user.")
-            @RequestParam(required = false) Long facilityId) {
-        ProcurementDashboardResponseDto response = dashboardService.getProcurementDashboard(facilityId);
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        ProcurementDashboardResponseDto response = dashboardService.getProcurementDashboard(pharmacyId);
         return ResponseEntity.ok(response);
     }
 
@@ -45,9 +45,9 @@ public class DashboardController {
     @GetMapping("/summary")
     @Operation(summary = "Get Combined Dashboard Summary", description = "Retrieves both Pharmacist and Procurement dashboard datasets in a single response.")
     public ResponseEntity<DashboardResponseDto> getDashboardSummary(
-            @Parameter(description = "Optional facility ID filter.")
-            @RequestParam(required = false) Long facilityId) {
-        DashboardResponseDto response = dashboardService.getDashboardSummary(facilityId);
+            @Parameter(description = "Pharmacy ID", required = true)
+            @RequestParam Long pharmacyId) {
+        DashboardResponseDto response = dashboardService.getDashboardSummary(pharmacyId);
         return ResponseEntity.ok(response);
     }
 }

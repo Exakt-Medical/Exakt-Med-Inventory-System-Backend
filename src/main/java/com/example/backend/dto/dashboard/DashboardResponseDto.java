@@ -14,6 +14,8 @@ import lombok.Setter;
 public class DashboardResponseDto {
     private Long facilityId;
     private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private PharmacistDashboardResponseDto pharmacistDashboard;
     private ProcurementDashboardResponseDto procurementDashboard;
 }

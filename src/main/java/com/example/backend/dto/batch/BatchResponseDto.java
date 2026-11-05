@@ -17,8 +17,8 @@ public class BatchResponseDto {
 
     private Long id;
     private String batchNum;
-    private Long facilityId;
-    private String facilityName;
+    private Long pharmacyId;
+    private String pharmacyName;
     private Long orderedItemId;
     private Long orderId;
     private String poNumber;

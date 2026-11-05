@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "inventory_transactions", indexes = {
-        @Index(name = "idx_inv_tx_facility_sku", columnList = "facilityId, skuId, createdAt"),
+        @Index(name = "idx_inv_tx_pharmacy_sku", columnList = "pharmacyId, skuId, createdAt"),
         @Index(name = "idx_inv_tx_batch", columnList = "batchId"),
         @Index(name = "idx_inv_tx_created_at", columnList = "createdAt")
 })
@@ -48,8 +48,8 @@ public class InventoryTransaction {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "facilityId", nullable = false)
-    private Facility facility;
+    @JoinColumn(name = "pharmacyId", nullable = false)
+    private Pharmacy pharmacy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "skuId", nullable = false)

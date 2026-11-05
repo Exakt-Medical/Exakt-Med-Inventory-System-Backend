@@ -2,12 +2,17 @@ package com.example.backend.service;
 
 import com.example.backend.dto.assign.FacilityAssignRequestDto;
 import com.example.backend.dto.facility.FacilityResponseDto;
+import com.example.backend.dto.pharmacy.PharmacyResponseDto;
 import com.example.backend.dto.user.UserResponseDto;
+import com.example.backend.entity.AuditLog;
 import com.example.backend.entity.Facility;
 import com.example.backend.entity.User;
 import com.example.backend.entity.UserFacilityLink;
+import com.example.backend.entity.UserPharmacyLink;
 import com.example.backend.repository.FacilityRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.UserFacilityLinkRepository;
+import com.example.backend.repository.UserPharmacyLinkRepository;
 import com.example.backend.repository.UserRepository;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.security.access.AccessDeniedException;
@@ -22,25 +27,32 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.example.backend.entity.AuditLog;
-
 @Service
 public class FacilityAssignService {
-    
+
     private final UserRepository userRepository;
     private final FacilityRepository facilityRepository;
     private final UserFacilityLinkRepository userFacilityLinkRepository;
+    private final UserPharmacyLinkRepository userPharmacyLinkRepository;
+    private final PharmacyRepository pharmacyRepository;
+    private final PharmacyService pharmacyService;
     private final AuditLogService auditLogService;
     private final FacilityAccessGuard facilityAccessGuard;
 
     public FacilityAssignService(UserRepository userRepository,
                                  FacilityRepository facilityRepository,
                                  UserFacilityLinkRepository userFacilityLinkRepository,
+                                 UserPharmacyLinkRepository userPharmacyLinkRepository,
+                                 PharmacyRepository pharmacyRepository,
+                                 PharmacyService pharmacyService,
                                  AuditLogService auditLogService,
                                  FacilityAccessGuard facilityAccessGuard) {
         this.userRepository = userRepository;
         this.facilityRepository = facilityRepository;
         this.userFacilityLinkRepository = userFacilityLinkRepository;
+        this.userPharmacyLinkRepository = userPharmacyLinkRepository;
+        this.pharmacyRepository = pharmacyRepository;
+        this.pharmacyService = pharmacyService;
         this.auditLogService = auditLogService;
         this.facilityAccessGuard = facilityAccessGuard;
     }
@@ -125,6 +137,16 @@ public class FacilityAssignService {
                     throw new AccessDeniedException("Admins cannot unassign fellow Admin accounts from facilities. Only SuperAdmin can manage Admin assignments.");
                 }
 
+                // Also unassign user from any pharmacies belonging to this facility
+                List<UserPharmacyLink> userPharmacyLinks = userPharmacyLinkRepository.findByUserId(userId);
+                for (UserPharmacyLink pLink : userPharmacyLinks) {
+                    if (pLink.getPharmacy() != null
+                            && pLink.getPharmacy().getFacility() != null
+                            && facilityId.equals(pLink.getPharmacy().getFacility().getId())) {
+                        userPharmacyLinkRepository.delete(pLink);
+                    }
+                }
+
                 userFacilityLinkRepository.delete(linkOpt.get());
                 unassignedUserIds.add(userId);
             }
@@ -150,9 +172,8 @@ public class FacilityAssignService {
         return "Successfully unassigned user IDs " + unassignedUserIds + " from facility '" + facility.getName() + "'";
     }
 
-
-
-    // 5. GET ASSIGNED FACILITIES FOR CURRENT AUTHENTICATED USER
+    // 3. GET ASSIGNED FACILITIES FOR CURRENT AUTHENTICATED USER
+    @Transactional(readOnly = true)
     @PreAuthorize("isAuthenticated()")
     public List<FacilityResponseDto> getMyAssignedFacilities() {
         User currentUser = getCurrentUser();
@@ -165,7 +186,8 @@ public class FacilityAssignService {
                 .collect(Collectors.toList());
     }
 
-    // 6. GET ALL USERS ASSIGNED TO A SPECIFIC FACILITY
+    // 4. GET ALL USERS ASSIGNED TO A SPECIFIC FACILITY
+    @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin')")
     public List<UserResponseDto> getUsersByFacilityId(Long facilityId) {
         facilityAccessGuard.verifyFacilityAccess(facilityId);
@@ -173,7 +195,17 @@ public class FacilityAssignService {
                 .stream()
                 .map(link -> {
                     User u = link.getUser();
-                    return new UserResponseDto(
+                    List<Long> assignedFacilityIds = userFacilityLinkRepository.findByUserId(u.getId())
+                            .stream()
+                            .map(fl -> fl.getFacility().getId())
+                            .collect(Collectors.toList());
+                    List<Long> assignedPharmacyIds = userPharmacyLinkRepository.findByUserId(u.getId())
+                            .stream()
+                            .map(pl -> pl.getPharmacy().getId())
+                            .collect(Collectors.toList());
+                    Long primaryPharmacyId = assignedPharmacyIds.isEmpty() ? null : assignedPharmacyIds.get(0);
+
+                    UserResponseDto dto = new UserResponseDto(
                             u.getId(),
                             u.getName(),
                             u.getUsername(),
@@ -182,18 +214,27 @@ public class FacilityAssignService {
                             u.getRole(),
                             u.getStatus(),
                             facilityId,
+                            primaryPharmacyId,
                             u.getCreatedAt(),
                             null
                     );
+                    dto.setAssignedFacilityIds(assignedFacilityIds);
+                    dto.setAssignedPharmacyIds(assignedPharmacyIds);
+                    return dto;
                 })
                 .collect(Collectors.toList());
     }
 
-    // Helper: Map Facility to FacilityResponseDto with populated assignedUserIds
+    // Helper: Map Facility to FacilityResponseDto with populated assignedUserIds & pharmacies
     private FacilityResponseDto mapFacilityToDtoWithAssignedUsers(Facility f) {
         List<Long> assignedUserIds = userFacilityLinkRepository.findByFacilityId(f.getId())
                 .stream()
                 .map(link -> link.getUser().getId())
+                .collect(Collectors.toList());
+
+        List<PharmacyResponseDto> pharmacies = pharmacyRepository.findByFacilityId(f.getId())
+                .stream()
+                .map(p -> pharmacyService.mapToResponseDto(p, null))
                 .collect(Collectors.toList());
 
         FacilityResponseDto dto = new FacilityResponseDto();
@@ -202,14 +243,12 @@ public class FacilityAssignService {
         dto.setProjectName(f.getProject() != null ? f.getProject().getName() : null);
         dto.setFacilityCode(f.getFacilityCode());
         dto.setName(f.getName());
-        dto.setContactPerson(f.getContactPerson());
-        dto.setEmail(f.getEmail());
-        dto.setPhone(f.getPhone());
         dto.setAddress(f.getAddress());
         dto.setStatus(f.getStatus());
         dto.setCreatedAt(f.getCreatedAt());
         dto.setUpdatedAt(f.getUpdatedAt());
         dto.setAssignedUserIds(assignedUserIds);
+        dto.setPharmacies(pharmacies);
         return dto;
     }
 

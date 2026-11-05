@@ -1,12 +1,12 @@
 package com.example.backend.onerx.service;
 
-import com.example.backend.entity.Facility;
 import com.example.backend.entity.LibMedicine;
+import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.Sku;
 import com.example.backend.onerx.dto.OneRxBrandResponseDto;
 import com.example.backend.repository.BatchRepository;
-import com.example.backend.repository.FacilityRepository;
 import com.example.backend.repository.LibMedicineRepository;
+import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.stereotype.Service;
@@ -25,18 +25,18 @@ public class OneRxBrandService {
     private final SkuRepository skuRepository;
     private final BatchRepository batchRepository;
     private final LibMedicineRepository libMedicineRepository;
-    private final FacilityRepository facilityRepository;
+    private final PharmacyRepository pharmacyRepository;
     private final FacilityAccessGuard facilityAccessGuard;
 
     public OneRxBrandService(SkuRepository skuRepository,
                              BatchRepository batchRepository,
                              LibMedicineRepository libMedicineRepository,
-                             FacilityRepository facilityRepository,
+                             PharmacyRepository pharmacyRepository,
                              FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.batchRepository = batchRepository;
         this.libMedicineRepository = libMedicineRepository;
-        this.facilityRepository = facilityRepository;
+        this.pharmacyRepository = pharmacyRepository;
         this.facilityAccessGuard = facilityAccessGuard;
     }
 
@@ -44,11 +44,11 @@ public class OneRxBrandService {
      * Resolves available brand SKUs for a single drug code.
      */
     @Transactional(readOnly = true)
-    public OneRxBrandResponseDto getAvailableBrands(String drugCode, String facilityCode) {
+    public OneRxBrandResponseDto getAvailableBrands(String drugCode, String pharmacyCode) {
         if (drugCode == null || drugCode.trim().isBlank()) {
             throw new IllegalArgumentException("Parameter 'drug_code' is required.");
         }
-        List<OneRxBrandResponseDto> results = getAvailableBrandsForMultipleDrugs(List.of(drugCode), facilityCode);
+        List<OneRxBrandResponseDto> results = getAvailableBrandsForMultipleDrugs(List.of(drugCode), pharmacyCode);
         return results.isEmpty() ? null : results.get(0);
     }
 
@@ -56,24 +56,24 @@ public class OneRxBrandService {
      * Resolves available brand SKUs for comma-separated drug codes.
      */
     @Transactional(readOnly = true)
-    public List<OneRxBrandResponseDto> getAvailableBrandsForCommaSeparatedDrugs(String drugCodeParam, String facilityCode) {
+    public List<OneRxBrandResponseDto> getAvailableBrandsForCommaSeparatedDrugs(String drugCodeParam, String pharmacyCode) {
         if (drugCodeParam == null || drugCodeParam.trim().isBlank()) {
             throw new IllegalArgumentException("Parameter 'drug_code' is required.");
         }
-        return getAvailableBrandsForMultipleDrugs(List.of(drugCodeParam), facilityCode);
+        return getAvailableBrandsForMultipleDrugs(List.of(drugCodeParam), pharmacyCode);
     }
 
     /**
-     * Resolves available brand SKUs for multiple generic drug codes in a facility.
+     * Resolves available brand SKUs for multiple generic drug codes in a pharmacy.
      *
      * @param drugCodes    list or comma-separated list of drug codes (e.g. ["DRG-001", "DRG-002"])
-     * @param facilityCode the facility code (e.g. "FAC-001")
+     * @param pharmacyCode the pharmacy code (e.g. "PHM-001")
      * @return List of OneRxBrandResponseDto, one entry per requested drug code
      */
     @Transactional(readOnly = true)
-    public List<OneRxBrandResponseDto> getAvailableBrandsForMultipleDrugs(List<String> drugCodes, String facilityCode) {
-        if (facilityCode == null || facilityCode.trim().isBlank()) {
-            throw new IllegalArgumentException("Parameter 'facility_code' is required.");
+    public List<OneRxBrandResponseDto> getAvailableBrandsForMultipleDrugs(List<String> drugCodes, String pharmacyCode) {
+        if (pharmacyCode == null || pharmacyCode.trim().isBlank()) {
+            throw new IllegalArgumentException("Parameter 'pharmacy_code' is required.");
         }
 
         // 1. Parse, clean, split comma-separated codes, and deduplicate preserving order
@@ -95,13 +95,13 @@ public class OneRxBrandService {
             throw new IllegalArgumentException("At least one valid 'drug_code' is required.");
         }
 
-        String trimmedFacilityCode = facilityCode.trim();
+        String trimmedPharmacyCode = pharmacyCode.trim();
 
-        // 2. Resolve Facility & enforce facility access
-        Facility facility = resolveFacility(trimmedFacilityCode)
-                .orElseThrow(() -> new RuntimeException("Facility not found with code: " + trimmedFacilityCode));
+        // 2. Resolve Pharmacy & enforce pharmacy access
+        Pharmacy pharmacy = resolvePharmacy(trimmedPharmacyCode)
+                .orElseThrow(() -> new RuntimeException("Pharmacy not found with code: " + trimmedPharmacyCode));
 
-        facilityAccessGuard.verifyFacilityAccess(facility.getId());
+        facilityAccessGuard.verifyPharmacyAccess(pharmacy.getId());
 
         // 3. Resolve all LibMedicines
         List<LibMedicine> medicines = libMedicineRepository.findByDrugCodeIn(distinctCodes);
@@ -115,16 +115,16 @@ public class OneRxBrandService {
             }
         }
 
-        // 4. Query all available SKUs in the facility for these drugs (units > 0)
-        List<Sku> availableSkus = skuRepository.findAvailableSkusByDrugCodesAndFacilityId(
+        // 4. Query all available SKUs in the pharmacy for these drugs (units > 0)
+        List<Sku> availableSkus = skuRepository.findAvailableSkusByDrugCodesAndPharmacyId(
                 distinctCodes,
-                facility.getId()
+                pharmacy.getId()
         );
 
         // Compute un-deducted expired batch units per SKU so expired stock is excluded from available quantity
         Map<Long, Long> undeductedExpiredUnitsBySkuId = new HashMap<>();
-        List<Object[]> expiredMetrics = batchRepository.findExpiredBatchMetricsByFacilityId(
-                facility.getId(),
+        List<Object[]> expiredMetrics = batchRepository.findExpiredBatchMetricsByPharmacyId(
+                pharmacy.getId(),
                 LocalDate.now()
         );
         for (Object[] row : expiredMetrics) {
@@ -140,9 +140,13 @@ public class OneRxBrandService {
                 .filter(sku -> sku.getLibMedicine() != null && sku.getLibMedicine().getDrugCode() != null)
                 .collect(Collectors.groupingBy(sku -> sku.getLibMedicine().getDrugCode()));
 
-        String displayFacilityCode = (facility.getFacilityCode() != null && !facility.getFacilityCode().isBlank())
-                ? facility.getFacilityCode()
-                : String.valueOf(facility.getId());
+        String displayPharmacyCode = (pharmacy.getPharmacyCode() != null && !pharmacy.getPharmacyCode().isBlank())
+                ? pharmacy.getPharmacyCode()
+                : String.valueOf(pharmacy.getId());
+
+        String displayFacilityCode = (pharmacy.getFacility() != null && pharmacy.getFacility().getFacilityCode() != null)
+                ? pharmacy.getFacility().getFacilityCode()
+                : null;
 
         // 5. Build response list matching the requested order (excluding un-deducted expired batch units)
         List<OneRxBrandResponseDto> responseList = new java.util.ArrayList<>();
@@ -170,6 +174,7 @@ public class OneRxBrandService {
             responseList.add(OneRxBrandResponseDto.builder()
                     .drugCode(medicine.getDrugCode())
                     .drugName(medicine.getDrugDescription())
+                    .pharmacyCode(displayPharmacyCode)
                     .facilityCode(displayFacilityCode)
                     .sku(skuItems)
                     .build());
@@ -178,14 +183,14 @@ public class OneRxBrandService {
         return responseList;
     }
 
-    private Optional<Facility> resolveFacility(String facilityCode) {
-        Optional<Facility> opt = facilityRepository.findByFacilityCode(facilityCode);
+    private Optional<Pharmacy> resolvePharmacy(String pharmacyCode) {
+        Optional<Pharmacy> opt = pharmacyRepository.findByPharmacyCode(pharmacyCode);
         if (opt.isPresent()) {
             return opt;
         }
         try {
-            Long numericId = Long.parseLong(facilityCode);
-            return facilityRepository.findById(numericId);
+            Long numericId = Long.parseLong(pharmacyCode);
+            return pharmacyRepository.findById(numericId);
         } catch (NumberFormatException ignored) {
             return Optional.empty();
         }

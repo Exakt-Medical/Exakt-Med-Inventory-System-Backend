@@ -34,6 +34,8 @@ public class UserRequestDto {
 
     private Boolean status;
 
-    // Required only when role is Pharmacist or Procurement
+    // Optional facility / pharmacy assignment when creating or updating user
     private Long facilityId;
+
+    private Long pharmacyId;
 }
