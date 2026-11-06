@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "facilities")
@@ -48,13 +49,13 @@ public class Facility {
 
     @PrePersist
     private void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
+        updatedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }
 
     @PreUpdate
     private void onUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }
 
 }

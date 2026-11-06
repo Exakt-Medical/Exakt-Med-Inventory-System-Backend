@@ -6,6 +6,7 @@ import lombok.Setter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "batches", indexes = {
@@ -70,7 +71,7 @@ public class Batch {
 
     @PrePersist
     private void onReceive() {
-        receivedAt = LocalDateTime.now();
+        receivedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }
 
 }

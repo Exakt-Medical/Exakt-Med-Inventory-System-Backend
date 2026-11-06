@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Collections;
@@ -119,7 +120,7 @@ public class AuditLogService {
         log.setTargetId(targetId);
         log.setDescription(description != null ? description : "");
         log.setVisibleRoles(visibleRoles != null ? visibleRoles : "Admin,Pharmacist,Procurement");
-        log.setCreatedAt(LocalDateTime.now());
+        log.setCreatedAt(LocalDateTime.now(ZoneId.of("Asia/Manila")));
 
         return auditLogRepository.save(log);
     }

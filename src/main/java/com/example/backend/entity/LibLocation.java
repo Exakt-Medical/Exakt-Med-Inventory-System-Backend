@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "lib_locations", indexes = {
@@ -60,8 +61,8 @@ public class LibLocation {
 
     @PrePersist
     protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
+        this.updatedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         if (this.isActive == null) {
             this.isActive = true;
         }
@@ -72,6 +73,6 @@ public class LibLocation {
 
     @PreUpdate
     protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }
 }

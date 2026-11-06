@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(
@@ -34,7 +35,7 @@ public class UserFacilityLink {
 
     @PrePersist
     private void onAssign() {
-        assignedAt = LocalDateTime.now();
+        assignedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }
 
 }

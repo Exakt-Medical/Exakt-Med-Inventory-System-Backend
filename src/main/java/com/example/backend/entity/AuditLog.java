@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "audit_logs", indexes = {
@@ -74,7 +75,7 @@ public class AuditLog {
     @PrePersist
     private void onCreate() {
         if (this.createdAt == null) {
-            this.createdAt = LocalDateTime.now();
+            this.createdAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         }
         if (this.severity == null) {
             this.severity = Severity.INFO;

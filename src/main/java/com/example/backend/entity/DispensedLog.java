@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "dispensed_logs")
@@ -45,13 +46,13 @@ public class DispensedLog {
 
     @PrePersist
     private void onCreate() {
-        dispensedAt = LocalDateTime.now();
+        dispensedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }
 
     @PreUpdate
     private void onUpdate() {
         if (status == Status.Received) {
-            receivedAt = LocalDateTime.now();
+            receivedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         }
     }
 }
