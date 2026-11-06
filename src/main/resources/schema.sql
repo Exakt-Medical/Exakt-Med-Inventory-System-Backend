@@ -266,6 +266,19 @@ CREATE INDEX IF NOT EXISTS idx_batch_location ON batches (location_id);
 -- 6. DISPENSING, LEDGER & AUDIT LOGS
 -- -----------------------------------------------------------------------------
 
+-- Entity: Patient (Scoped to Pharmacy)
+CREATE TABLE IF NOT EXISTS patients (
+    id BIGSERIAL PRIMARY KEY,
+    pharmacy_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    contact_number VARCHAR(255),
+    created_at TIMESTAMP(6) NOT NULL,
+    updated_at TIMESTAMP(6),
+    CONSTRAINT fk_patients_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacy(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_patients_pharmacy_name ON patients (pharmacy_id, name);
+
 -- Entity: DispensedLog
 CREATE TABLE IF NOT EXISTS dispensed_logs (
     id BIGSERIAL PRIMARY KEY,
