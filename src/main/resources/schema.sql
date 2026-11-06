@@ -274,6 +274,7 @@ CREATE TABLE IF NOT EXISTS dispensed_logs (
     contact_number VARCHAR(255) NOT NULL,
     units_dispensed BIGINT NOT NULL,
     status VARCHAR(255) NOT NULL CHECK (status IN ('Pending', 'Received')),
+    dispensed_by VARCHAR(255) NOT NULL,
     dispensed_at TIMESTAMP(6) NOT NULL,
     received_at TIMESTAMP(6),
     CONSTRAINT fk_dispensed_logs_sku FOREIGN KEY (sku_id) REFERENCES sku(id)

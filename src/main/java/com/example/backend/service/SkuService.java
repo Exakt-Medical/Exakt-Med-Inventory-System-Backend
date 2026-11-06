@@ -732,6 +732,7 @@ public class SkuService {
         Batch targetBatch = null;
         Long pharmacyId = sku.getPharmacy() != null ? sku.getPharmacy().getId() : null;
         boolean hasBatches = pharmacyId != null && batchService.hasBatchesForSku(pharmacyId, sku.getId());
+        User currentUser = getCurrentUser();
 
         switch (request.getType()) {
             case ADD:
@@ -799,6 +800,10 @@ public class SkuService {
                 dispensedLog.setContactNumber(request.getContactNumber().trim());
                 dispensedLog.setUnitsDispensed(unitsToDeduct);
                 dispensedLog.setStatus(DispensedLog.Status.Pending);
+                String dispensedByName = (currentUser != null && currentUser.getName() != null && !currentUser.getName().isBlank())
+                        ? currentUser.getName().trim()
+                        : (currentUser != null && currentUser.getUsername() != null ? currentUser.getUsername().trim() : "System");
+                dispensedLog.setDispensedBy(dispensedByName);
                 dispensedLogRepository.save(dispensedLog);
             } else {
                 // When reason is other than Dispensed, require and deduct from the specific target batch
@@ -856,7 +861,7 @@ public class SkuService {
         }
 
         String refNum = "ADJ-" + System.currentTimeMillis();
-        User currentUser = getCurrentUser();
+        if (currentUser == null) currentUser = getCurrentUser();
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
 
         if (isDispensed && fefoDeductions.size() > 1) {

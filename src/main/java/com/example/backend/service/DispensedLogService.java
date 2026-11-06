@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -40,7 +41,7 @@ public class DispensedLogService {
         }
 
         log.setStatus(DispensedLog.Status.Received);
-        log.setReceivedAt(LocalDateTime.now());
+        log.setReceivedAt(LocalDateTime.now(ZoneId.of("Asia/Manila")));
         DispensedLog saved = dispensedLogRepository.save(log);
 
         if (saved.getSku() != null && saved.getSku().getPharmacy() != null) {
@@ -102,6 +103,7 @@ public class DispensedLogService {
         dto.setContactNumber(log.getContactNumber());
         dto.setUnitsDispensed(log.getUnitsDispensed());
         dto.setStatus(log.getStatus());
+        dto.setDispensedBy(log.getDispensedBy());
         dto.setDispensedAt(log.getDispensedAt());
         dto.setReceivedAt(log.getReceivedAt());
 

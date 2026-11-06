@@ -25,6 +25,7 @@ public class DispensedLogResponseDto {
     private String contactNumber;
     private Long unitsDispensed;
     private DispensedLog.Status status;
+    private String dispensedBy;
     private LocalDateTime dispensedAt;
     private LocalDateTime receivedAt;
 }

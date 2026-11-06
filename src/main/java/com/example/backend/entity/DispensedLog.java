@@ -39,6 +39,9 @@ public class DispensedLog {
     @Enumerated(EnumType.STRING)
     private Status status;
 
+    @Column(nullable = false)
+    private String dispensedBy;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime dispensedAt;
 
