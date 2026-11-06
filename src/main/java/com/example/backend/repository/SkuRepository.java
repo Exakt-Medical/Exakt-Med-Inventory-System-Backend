@@ -77,7 +77,7 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
     long countCriticalByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     // 3. Dropdown list for modals
-    @Query("SELECT s FROM Sku s LEFT JOIN FETCH s.libMedicine m WHERE s.pharmacy.id = :pharmacyId ORDER BY s.brandName ASC")
+    @Query("SELECT s FROM Sku s LEFT JOIN FETCH s.libMedicine m WHERE s.pharmacy.id = :pharmacyId ORDER BY m.drugDescription ASC, s.brandName ASC")
     List<Sku> findDropdownSkusByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     // 4. Procurement reorder-needed query

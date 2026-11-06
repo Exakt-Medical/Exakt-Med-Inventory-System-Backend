@@ -51,7 +51,7 @@ public class SkuController {
             @Parameter(description = "Page size")
             @RequestParam(defaultValue = "10") int size,
             @Parameter(description = "Sort property (brandName, name, units, etc.)")
-            @RequestParam(defaultValue = "brandName") String sortBy,
+            @RequestParam(defaultValue = "genericName") String sortBy,
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "ASC") String sortDir) {
         return ResponseEntity.ok(skuService.getSkusPaginated(

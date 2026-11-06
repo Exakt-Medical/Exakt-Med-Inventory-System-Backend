@@ -498,18 +498,25 @@ public class SkuService {
         int pageSize = size > 0 ? size : 10;
 
         Sort.Direction direction = "DESC".equalsIgnoreCase(sortDir) ? Sort.Direction.DESC : Sort.Direction.ASC;
-        String sortProperty = (sortBy != null && !sortBy.isBlank()) ? sortBy.trim() : "brandName";
+        String sortProperty = (sortBy != null && !sortBy.isBlank()) ? sortBy.trim() : "genericName";
 
-        if ("brandName".equalsIgnoreCase(sortProperty)) sortProperty = "brandName";
-        else if ("sku".equalsIgnoreCase(sortProperty) || "name".equalsIgnoreCase(sortProperty)) sortProperty = "name";
-        else if ("currentStock".equalsIgnoreCase(sortProperty) || "units".equalsIgnoreCase(sortProperty)) sortProperty = "units";
-        else if ("minimumLevel".equalsIgnoreCase(sortProperty)) sortProperty = "minimumLevel";
-        else if ("reorderLevel".equalsIgnoreCase(sortProperty)) sortProperty = "reorderLevel";
-        else if ("maximumLevel".equalsIgnoreCase(sortProperty)) sortProperty = "maximumLevel";
-        else if ("createdAt".equalsIgnoreCase(sortProperty)) sortProperty = "createdAt";
-        else sortProperty = "brandName";
+        Sort sort;
+        if ("genericName".equalsIgnoreCase(sortProperty)
+                || "drugDescription".equalsIgnoreCase(sortProperty)
+                || "libMedicine.drugDescription".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "libMedicine.drugDescription").and(Sort.by(direction, "brandName"));
+        } else if ("brandName".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "brandName");
+        }
+        else if ("sku".equalsIgnoreCase(sortProperty) || "name".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "name");
+        else if ("currentStock".equalsIgnoreCase(sortProperty) || "units".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "units");
+        else if ("minimumLevel".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "minimumLevel");
+        else if ("reorderLevel".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "reorderLevel");
+        else if ("maximumLevel".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "maximumLevel");
+        else if ("createdAt".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "createdAt");
+        else sort = Sort.by(direction, "libMedicine.drugDescription").and(Sort.by(direction, "brandName"));
 
-        Pageable pageable = PageRequest.of(pageIndex, pageSize, Sort.by(direction, sortProperty));
+        Pageable pageable = PageRequest.of(pageIndex, pageSize, sort);
 
         String trimmedSearch = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
         String trimmedStatus = (status != null && !status.trim().isEmpty()) ? status.trim().toUpperCase() : "ALL";
