@@ -23,6 +23,10 @@ public interface BatchRepository extends JpaRepository<Batch, Long> {
     Optional<Batch> findByBatchNumAndPharmacyId(String batchNum, Long pharmacyId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Batch b WHERE b.batchNum = :batchNum AND b.pharmacy.id = :pharmacyId")
+    Optional<Batch> findByBatchNumAndPharmacyIdForUpdate(@Param("batchNum") String batchNum, @Param("pharmacyId") Long pharmacyId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Batch b WHERE b.id = :id")
     Optional<Batch> findByIdForUpdate(@Param("id") Long id);
 

@@ -40,6 +40,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -114,56 +115,108 @@ public class BatchService {
             throw new RuntimeException("Batch number is required.");
         }
 
-        if (batchRepository.existsByBatchNumAndPharmacyId(trimmedBatchNum, pharmacy.getId())) {
-            throw new RuntimeException("Batch number '" + trimmedBatchNum + "' already exists in this pharmacy.");
-        }
-
-        if (request.getManufactureDate() == null) {
-            throw new RuntimeException("Manufacture date is required.");
-        }
-
-        if (request.getExpiryDate() == null) {
-            throw new RuntimeException("Expiry date is required.");
-        }
-
-        if (!request.getExpiryDate().isAfter(request.getManufactureDate())) {
-            throw new RuntimeException("Expiry date must be after manufacture date.");
-        }
-
-        if (request.getLocationId() == null) {
-            throw new RuntimeException("Storage location is required for receiving batch.");
-        }
-
-        LibLocation location = libLocationRepository.findById(request.getLocationId())
-                .orElseThrow(() -> new RuntimeException("Storage location not found with ID: " + request.getLocationId()));
-
-        if (location.getIsActive() != null && !location.getIsActive()) {
-            throw new RuntimeException("Storage location '" + location.getCode() + "' is inactive and cannot accept new batches.");
-        }
-
-        if (location.getPharmacy() != null && !location.getPharmacy().getId().equals(pharmacy.getId())) {
-            throw new RuntimeException("Storage location '" + location.getCode() + "' belongs to another pharmacy.");
-        }
-
-        Batch.Status initialStatus = request.getStatus() != null ? request.getStatus() : Batch.Status.Available;
-        if (initialStatus == Batch.Status.Available && !request.getExpiryDate().isAfter(LocalDate.now())) {
-            throw new RuntimeException("Cannot receive an already-expired batch as Available stock. Expiry date must be after today.");
-        }
-
-        Batch batch = new Batch();
-        batch.setPharmacy(pharmacy);
-        batch.setOrderedItem(orderedItem);
-        batch.setLocation(location);
-        batch.setBatchNum(trimmedBatchNum);
-        long units = (request.getUnits() != null && request.getUnits() > 0)
+        long unitsToAdd = (request.getUnits() != null && request.getUnits() > 0)
                 ? request.getUnits()
                 : (orderedItem.getOrderedUnits() != null ? orderedItem.getOrderedUnits() : 0L);
-        batch.setUnits(units);
-        batch.setManufactureDate(request.getManufactureDate());
-        batch.setExpiryDate(request.getExpiryDate());
-        batch.setStatus(initialStatus);
-        batch.setSkuDeducted(initialStatus == Batch.Status.Expired);
-        batch.setNotes(request.getNotes());
+
+        if (unitsToAdd <= 0) {
+            throw new RuntimeException("Received units must be greater than zero.");
+        }
+
+        Optional<Batch> existingBatchOpt = batchRepository.findByBatchNumAndPharmacyIdForUpdate(trimmedBatchNum, pharmacy.getId());
+        boolean isExisting = existingBatchOpt.isPresent();
+
+        Batch batch;
+        LibLocation location;
+
+        if (isExisting) {
+            batch = existingBatchOpt.get();
+
+            // Guard: Ensure batch belongs to the same SKU
+            Sku currentSku = orderedItem.getSku();
+            if (batch.getOrderedItem() != null && batch.getOrderedItem().getSku() != null && currentSku != null) {
+                if (!batch.getOrderedItem().getSku().getId().equals(currentSku.getId())) {
+                    throw new RuntimeException("Batch number '" + trimmedBatchNum + "' is already registered under a different SKU ("
+                            + batch.getOrderedItem().getSku().getName() + "). Cannot merge stock across different medicines.");
+                }
+            }
+
+            // Guard: Cannot receive stock into an already-expired batch
+            if (batch.getStatus() == Batch.Status.Expired || !batch.getExpiryDate().isAfter(LocalDate.now())) {
+                throw new RuntimeException("Cannot receive stock into an already-expired batch ('" + trimmedBatchNum + "', expired on " + batch.getExpiryDate() + ").");
+            }
+
+            // Location: use requested location if provided, otherwise preserve existing batch location
+            if (request.getLocationId() != null) {
+                location = libLocationRepository.findById(request.getLocationId())
+                        .orElseThrow(() -> new RuntimeException("Storage location not found with ID: " + request.getLocationId()));
+                if (location.getIsActive() != null && !location.getIsActive()) {
+                    throw new RuntimeException("Storage location '" + location.getCode() + "' is inactive and cannot accept new batches.");
+                }
+                if (location.getPharmacy() != null && !location.getPharmacy().getId().equals(pharmacy.getId())) {
+                    throw new RuntimeException("Storage location '" + location.getCode() + "' belongs to another pharmacy.");
+                }
+                batch.setLocation(location);
+            } else {
+                location = batch.getLocation();
+                if (location == null) {
+                    throw new RuntimeException("Storage location is required for receiving batch.");
+                }
+            }
+
+            // Increment existing batch quantity (preserving existing manufactureDate and expiryDate)
+            long currentBatchUnits = batch.getUnits() != null ? batch.getUnits() : 0L;
+            batch.setUnits(currentBatchUnits + unitsToAdd);
+            batch.setOrderedItem(orderedItem);
+            if (request.getNotes() != null && !request.getNotes().trim().isEmpty()) {
+                batch.setNotes(request.getNotes().trim());
+            }
+        } else {
+            // New Batch validations
+            if (request.getManufactureDate() == null) {
+                throw new RuntimeException("Manufacture date is required.");
+            }
+
+            if (request.getExpiryDate() == null) {
+                throw new RuntimeException("Expiry date is required.");
+            }
+
+            if (!request.getExpiryDate().isAfter(request.getManufactureDate())) {
+                throw new RuntimeException("Expiry date must be after manufacture date.");
+            }
+
+            if (request.getLocationId() == null) {
+                throw new RuntimeException("Storage location is required for receiving batch.");
+            }
+
+            location = libLocationRepository.findById(request.getLocationId())
+                    .orElseThrow(() -> new RuntimeException("Storage location not found with ID: " + request.getLocationId()));
+
+            if (location.getIsActive() != null && !location.getIsActive()) {
+                throw new RuntimeException("Storage location '" + location.getCode() + "' is inactive and cannot accept new batches.");
+            }
+
+            if (location.getPharmacy() != null && !location.getPharmacy().getId().equals(pharmacy.getId())) {
+                throw new RuntimeException("Storage location '" + location.getCode() + "' belongs to another pharmacy.");
+            }
+
+            Batch.Status initialStatus = request.getStatus() != null ? request.getStatus() : Batch.Status.Available;
+            if (initialStatus == Batch.Status.Available && !request.getExpiryDate().isAfter(LocalDate.now())) {
+                throw new RuntimeException("Cannot receive an already-expired batch as Available stock. Expiry date must be after today.");
+            }
+
+            batch = new Batch();
+            batch.setPharmacy(pharmacy);
+            batch.setOrderedItem(orderedItem);
+            batch.setLocation(location);
+            batch.setBatchNum(trimmedBatchNum);
+            batch.setUnits(unitsToAdd);
+            batch.setManufactureDate(request.getManufactureDate());
+            batch.setExpiryDate(request.getExpiryDate());
+            batch.setStatus(initialStatus);
+            batch.setSkuDeducted(initialStatus == Batch.Status.Expired);
+            batch.setNotes(request.getNotes());
+        }
 
         Batch savedBatch = batchRepository.save(batch);
 
@@ -173,7 +226,6 @@ public class BatchService {
             if (skuRef != null) {
                 Sku sku = skuRepository.findByIdForUpdate(skuRef.getId()).orElse(skuRef);
                 long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
-                long unitsToAdd = savedBatch.getUnits() != null ? savedBatch.getUnits() : 0L;
                 sku.setUnits(currentUnits + unitsToAdd);
                 skuRepository.save(sku);
 
@@ -209,7 +261,7 @@ public class BatchService {
         }
 
         // UPDATE ORDERED ITEM RECEIVED UNITS & UPDATE PARENT ORDER STATUS
-        long itemReceived = (orderedItem.getReceivedUnits() != null ? orderedItem.getReceivedUnits() : 0L) + units;
+        long itemReceived = (orderedItem.getReceivedUnits() != null ? orderedItem.getReceivedUnits() : 0L) + unitsToAdd;
         orderedItem.setReceivedUnits(itemReceived);
         orderedItemRepository.save(orderedItem);
 
@@ -218,15 +270,19 @@ public class BatchService {
             updateOrderStatusOnReceipt(order);
         }
 
+        String auditDetails = isExisting
+                ? "Added " + unitsToAdd + " units to existing batch '" + savedBatch.getBatchNum() + "' (Total batch units now: " + savedBatch.getUnits() + ") for SKU '" + (orderedItem.getSku() != null ? orderedItem.getSku().getName() : "") + "' at location [" + location.getCode() + "]. Expiry: " + savedBatch.getExpiryDate() + "."
+                : "Received batch '" + savedBatch.getBatchNum() + "' (" + unitsToAdd + " units) for SKU '" + (orderedItem.getSku() != null ? orderedItem.getSku().getName() : "") + "' at location [" + location.getCode() + "]. Expiry: " + savedBatch.getExpiryDate() + ".";
+
         auditLogService.logAction(
                 savedBatch.getPharmacy(),
                 "Inventory",
                 "BATCH_RECEIVED",
-                "Batch Stock Received (" + savedBatch.getUnits() + " units)",
+                "Batch Stock Received (" + unitsToAdd + " units)",
                 AuditLog.Severity.SUCCESS,
                 savedBatch.getBatchNum(),
                 savedBatch.getId(),
-                "Received batch '" + savedBatch.getBatchNum() + "' (" + savedBatch.getUnits() + " units) for SKU '" + (orderedItem.getSku() != null ? orderedItem.getSku().getName() : "") + "' at location [" + location.getCode() + "]. Expiry: " + savedBatch.getExpiryDate() + ".",
+                auditDetails,
                 "Admin,Pharmacist"
         );
 
