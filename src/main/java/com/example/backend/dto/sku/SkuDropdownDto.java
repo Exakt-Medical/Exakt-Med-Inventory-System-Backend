@@ -1,5 +1,6 @@
 package com.example.backend.dto.sku;
 
+import com.example.backend.entity.Sku;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -21,6 +22,7 @@ public class SkuDropdownDto {
     private String dosage;
     private Long currentStock;
     private Long maximumLevel;
+    private Sku.Status status;
     private Boolean hasPendingRestock;
     private Long pendingRestockUnits;
     private String pendingRestockStatus;

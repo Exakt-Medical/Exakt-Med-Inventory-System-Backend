@@ -1,5 +1,6 @@
 package com.example.backend.dto.sku;
 
+import com.example.backend.entity.Sku;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -28,6 +29,7 @@ public class SkuResponseDto {
     private Long minimumLevel;
     private Long reorderLevel;
     private Long maximumLevel;
+    private Sku.Status status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private String message;

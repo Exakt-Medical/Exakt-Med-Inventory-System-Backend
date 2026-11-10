@@ -438,6 +438,10 @@ public class SkuService {
 
         // Check uniqueness in pharmacy
         if (skuRepository.existsByPharmacyIdAndName(pharmacy.getId(), skuName)) {
+            Optional<Sku> existing = skuRepository.findByPharmacyIdAndName(pharmacy.getId(), skuName);
+            if (existing.isPresent() && existing.get().getStatus() == Sku.Status.Inactive) {
+                throw new RuntimeException("An inactive SKU with code '" + skuName + "' already exists in this pharmacy. You can reactivate it instead of creating a duplicate.");
+            }
             throw new RuntimeException("SKU code '" + skuName + "' already exists in this pharmacy.");
         }
 
@@ -452,6 +456,7 @@ public class SkuService {
         sku.setMinimumLevel(request.getMinimumLevel());
         sku.setReorderLevel(request.getReorderLevel());
         sku.setMaximumLevel(request.getMaximumLevel());
+        sku.setStatus(request.getStatus() != null ? request.getStatus() : Sku.Status.Active);
 
         Sku savedSku = skuRepository.save(sku);
 
@@ -471,13 +476,14 @@ public class SkuService {
         return mapToResponseDto(savedSku, "SKU created successfully");
     }
 
-    // 2. GET SKUS PAGINATED (with debounced search & stock status filter)
+    // 2. GET SKUS PAGINATED (with debounced search, status filter, and stock level filter)
     @Transactional
     @PreAuthorize("isAuthenticated()")
     public PageResponseDto<SkuResponseDto> getSkusPaginated(
             Long pharmacyId,
             String search,
             String status,
+            String stockStatus,
             int page,
             int size,
             String sortBy,
@@ -520,12 +526,33 @@ public class SkuService {
 
         String trimmedSearch = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
         String trimmedStatus = (status != null && !status.trim().isEmpty()) ? status.trim().toUpperCase() : "ALL";
+        String trimmedStockStatus = (stockStatus != null && !stockStatus.trim().isEmpty()) ? stockStatus.trim().toUpperCase() : "ALL";
 
-        Page<Sku> skuPage = skuRepository.findSkusPaginated(pharmacyId, trimmedSearch, trimmedStatus, pageable);
+        // Backwards-compatibility check if status holds legacy stockStatus value
+        if (trimmedStockStatus.equals("ALL") && (trimmedStatus.equals("OPTIMAL") || trimmedStatus.equals("REORDER") || trimmedStatus.equals("CRITICAL") || trimmedStatus.equals("OUT_OF_STOCK"))) {
+            trimmedStockStatus = trimmedStatus;
+            trimmedStatus = "ALL";
+        }
+
+        Page<Sku> skuPage = skuRepository.findSkusPaginated(pharmacyId, trimmedSearch, trimmedStatus, trimmedStockStatus, pageable);
         Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
 
         Page<SkuResponseDto> dtoPage = skuPage.map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())));
         return PageResponseDto.from(dtoPage);
+    }
+
+    // Overloaded helper for callers specifying only status
+    @Transactional
+    @PreAuthorize("isAuthenticated()")
+    public PageResponseDto<SkuResponseDto> getSkusPaginated(
+            Long pharmacyId,
+            String search,
+            String status,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+        return getSkusPaginated(pharmacyId, search, status, null, page, size, sortBy, sortDir);
     }
 
     // 2b. GET SKU SUMMARY KPIS
@@ -581,6 +608,7 @@ public class SkuService {
                     .dosage(sku.getDosageStrength())
                     .currentStock(sku.getUnits() != null ? sku.getUnits() : 0L)
                     .maximumLevel(sku.getMaximumLevel())
+                    .status(sku.getStatus() != null ? sku.getStatus() : Sku.Status.Active)
                     .hasPendingRestock(hasActiveRestock)
                     .pendingRestockUnits(hasActiveRestock ? metrics.activeRestockUnits : 0L)
                     .pendingRestockStatus(restockStatus)
@@ -669,6 +697,9 @@ public class SkuService {
         existingSku.setMinimumLevel(request.getMinimumLevel());
         existingSku.setReorderLevel(request.getReorderLevel());
         existingSku.setMaximumLevel(request.getMaximumLevel());
+        if (request.getStatus() != null) {
+            existingSku.setStatus(request.getStatus());
+        }
 
         Sku updatedSku = skuRepository.save(existingSku);
 
@@ -681,14 +712,14 @@ public class SkuService {
                 AuditLog.Severity.INFO,
                 updatedSku.getName(),
                 updatedSku.getId(),
-                "Updated SKU details for '" + updatedSku.getName() + "'. Dosage: " + updatedSku.getDosageForm() + ", Reorder: " + updatedSku.getReorderLevel() + ", Max: " + updatedSku.getMaximumLevel() + ".",
+                "Updated SKU details for '" + updatedSku.getName() + "'. Dosage: " + updatedSku.getDosageForm() + ", Reorder: " + updatedSku.getReorderLevel() + ", Max: " + updatedSku.getMaximumLevel() + ", Status: " + updatedSku.getStatus() + ".",
                 "Admin,Pharmacist"
         );
 
         return mapToResponseDto(updatedSku, "SKU updated successfully");
     }
 
-    // 5. DELETE SKU
+    // 5. DEACTIVATE SKU (Soft Delete - Sets status to Inactive)
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public void deleteSku(Long id) {
@@ -699,20 +730,51 @@ public class SkuService {
             facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
         }
 
-        skuRepository.delete(sku);
+        sku.setStatus(Sku.Status.Inactive);
+        skuRepository.save(sku);
 
         auditLogService.logAction(
                 sku.getPharmacy(),
                 getCurrentUser(),
                 "SKU Catalog",
-                "SKU_DELETED",
-                "SKU Deleted (" + sku.getName() + ")",
+                "SKU_DEACTIVATED",
+                "SKU Set to Inactive (" + sku.getName() + ")",
                 AuditLog.Severity.WARNING,
                 sku.getName(),
                 sku.getId(),
-                "Deleted SKU '" + sku.getName() + "' from inventory catalog.",
+                "Set SKU '" + sku.getName() + "' status to Inactive in inventory catalog.",
                 "Admin,Pharmacist"
         );
+    }
+
+    // 5a. REACTIVATE SKU (Sets status back to Active)
+    @Transactional
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
+    public SkuResponseDto reactivateSku(Long id) {
+        Sku sku = skuRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
+
+        if (sku.getPharmacy() != null) {
+            facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
+        }
+
+        sku.setStatus(Sku.Status.Active);
+        Sku saved = skuRepository.save(sku);
+
+        auditLogService.logAction(
+                sku.getPharmacy(),
+                getCurrentUser(),
+                "SKU Catalog",
+                "SKU_REACTIVATED",
+                "SKU Reactivated (" + sku.getName() + ")",
+                AuditLog.Severity.INFO,
+                sku.getName(),
+                sku.getId(),
+                "Reactivated SKU '" + sku.getName() + "' (status set to Active).",
+                "Admin,Pharmacist"
+        );
+
+        return mapToResponseDto(saved, "SKU reactivated successfully");
     }
 
     // 5b. ADJUST SKU STOCK (Physical count / write-off / correction)
@@ -724,6 +786,10 @@ public class SkuService {
 
         if (sku.getPharmacy() != null) {
             facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
+        }
+
+        if (sku.getStatus() == Sku.Status.Inactive) {
+            throw new RuntimeException("Cannot adjust stock for an inactive SKU. Please reactivate the SKU first.");
         }
 
         long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
@@ -1114,6 +1180,7 @@ public class SkuService {
         dto.setMinimumLevel(sku.getMinimumLevel());
         dto.setReorderLevel(sku.getReorderLevel());
         dto.setMaximumLevel(sku.getMaximumLevel());
+        dto.setStatus(sku.getStatus() != null ? sku.getStatus() : Sku.Status.Active);
         dto.setCreatedAt(sku.getCreatedAt());
         dto.setUpdatedAt(sku.getUpdatedAt());
         dto.setMessage(message);

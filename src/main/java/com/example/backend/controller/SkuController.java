@@ -36,16 +36,18 @@ public class SkuController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
-    // 2. GET SKUS PAGINATED (Server-side paginated search & status filtering)
+    // 2. GET SKUS PAGINATED (Server-side paginated search & status/stock filtering)
     @GetMapping
-    @Operation(summary = "Get SKUs Paginated", description = "Retrieves paginated SKUs by pharmacy with optional keyword search, stock level filter, and sorting.")
+    @Operation(summary = "Get SKUs Paginated", description = "Retrieves paginated SKUs by pharmacy with optional keyword search (brand or generic name), status filter (ALL, ACTIVE, INACTIVE), stock level filter (ALL, OPTIMAL, REORDER, CRITICAL, OUT_OF_STOCK), and sorting.")
     public ResponseEntity<PageResponseDto<SkuResponseDto>> getSkusPaginated(
             @Parameter(description = "ID of the pharmacy", required = true)
             @RequestParam Long pharmacyId,
-            @Parameter(description = "Optional search keyword (brandName, SKU code, generic description)")
+            @Parameter(description = "Optional search keyword matching generic description or brand name")
             @RequestParam(required = false) String search,
-            @Parameter(description = "Optional stock status filter (ALL, OPTIMAL, REORDER, CRITICAL)")
+            @Parameter(description = "Optional catalog status filter (ALL, ACTIVE, INACTIVE)")
             @RequestParam(required = false) String status,
+            @Parameter(description = "Optional stock level filter (ALL, OPTIMAL, REORDER, CRITICAL, OUT_OF_STOCK)")
+            @RequestParam(required = false) String stockStatus,
             @Parameter(description = "Page index (0-based)")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Page size")
@@ -55,7 +57,7 @@ public class SkuController {
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "ASC") String sortDir) {
         return ResponseEntity.ok(skuService.getSkusPaginated(
-                pharmacyId, search, status, page, size, sortBy, sortDir));
+                pharmacyId, search, status, stockStatus, page, size, sortBy, sortDir));
     }
 
     // 2b. GET SKU SUMMARY KPIS
@@ -106,14 +108,23 @@ public class SkuController {
         return ResponseEntity.ok(skuService.updateSku(id, request));
     }
 
-    // 6. DELETE SKU
+    // 6. DEACTIVATE SKU (Soft Delete - Sets status to Inactive)
     @DeleteMapping("/{id:[0-9]+}")
-    @Operation(summary = "Delete SKU", description = "Deletes an SKU from the pharmacy if no active dependent records prevent deletion.")
+    @Operation(summary = "Deactivate SKU", description = "Sets SKU status to Inactive instead of permanently deleting it, preserving historical batches and transactions.")
     public ResponseEntity<String> deleteSku(
             @Parameter(description = "SKU ID", required = true)
             @PathVariable Long id) {
         skuService.deleteSku(id);
-        return ResponseEntity.ok("SKU deleted successfully");
+        return ResponseEntity.ok("SKU set to inactive successfully");
+    }
+
+    // 6b. REACTIVATE SKU (Sets status back to Active)
+    @PatchMapping("/{id:[0-9]+}/reactivate")
+    @Operation(summary = "Reactivate SKU", description = "Sets SKU status back to Active.")
+    public ResponseEntity<SkuResponseDto> reactivateSku(
+            @Parameter(description = "SKU ID", required = true)
+            @PathVariable Long id) {
+        return ResponseEntity.ok(skuService.reactivateSku(id));
     }
 
     // 7. ADJUST SKU STOCK

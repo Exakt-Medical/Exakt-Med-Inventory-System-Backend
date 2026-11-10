@@ -34,55 +34,61 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
 
     boolean existsByPharmacyIdAndNameAndIdNot(Long pharmacyId, String name, Long id);
 
-    // 1. Paginated search and stock-level filter (scoped to pharmacyId)
+    // 1. Paginated search, catalog status filter, and stock-level filter (scoped to pharmacyId)
     @Query(value = "SELECT s FROM Sku s LEFT JOIN s.libMedicine m WHERE " +
            "s.pharmacy.id = :pharmacyId AND " +
            "(:search IS NULL OR :search = '' OR " +
            " LOWER(s.brandName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
-           " LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            " LOWER(m.drugDescription) LIKE LOWER(CONCAT('%', :search, '%'))) AND " +
            "(:status IS NULL OR :status = '' OR :status = 'ALL' OR " +
-           " (:status = 'OPTIMAL' AND s.units > s.reorderLevel) OR " +
-           " (:status = 'REORDER' AND s.units <= s.reorderLevel AND s.units > s.minimumLevel) OR " +
-           " (:status = 'CRITICAL' AND s.units <= s.minimumLevel) OR " +
-           " (:status = 'OUT_OF_STOCK' AND s.units = 0))",
+           " (:status = 'ACTIVE' AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active)) OR " +
+           " (:status = 'INACTIVE' AND s.status = com.example.backend.entity.Sku.Status.Inactive)) AND " +
+           "(:stockStatus IS NULL OR :stockStatus = '' OR :stockStatus = 'ALL' OR " +
+           " (:stockStatus = 'OPTIMAL' AND s.units > s.reorderLevel) OR " +
+           " (:stockStatus = 'REORDER' AND s.units <= s.reorderLevel AND s.units > s.minimumLevel) OR " +
+           " (:stockStatus = 'CRITICAL' AND s.units <= s.minimumLevel) OR " +
+           " (:stockStatus = 'OUT_OF_STOCK' AND s.units = 0))",
            countQuery = "SELECT COUNT(s) FROM Sku s LEFT JOIN s.libMedicine m WHERE " +
            "s.pharmacy.id = :pharmacyId AND " +
            "(:search IS NULL OR :search = '' OR " +
            " LOWER(s.brandName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
-           " LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            " LOWER(m.drugDescription) LIKE LOWER(CONCAT('%', :search, '%'))) AND " +
            "(:status IS NULL OR :status = '' OR :status = 'ALL' OR " +
-           " (:status = 'OPTIMAL' AND s.units > s.reorderLevel) OR " +
-           " (:status = 'REORDER' AND s.units <= s.reorderLevel AND s.units > s.minimumLevel) OR " +
-           " (:status = 'CRITICAL' AND s.units <= s.minimumLevel) OR " +
-           " (:status = 'OUT_OF_STOCK' AND s.units = 0))")
+           " (:status = 'ACTIVE' AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active)) OR " +
+           " (:status = 'INACTIVE' AND s.status = com.example.backend.entity.Sku.Status.Inactive)) AND " +
+           "(:stockStatus IS NULL OR :stockStatus = '' OR :stockStatus = 'ALL' OR " +
+           " (:stockStatus = 'OPTIMAL' AND s.units > s.reorderLevel) OR " +
+           " (:stockStatus = 'REORDER' AND s.units <= s.reorderLevel AND s.units > s.minimumLevel) OR " +
+           " (:stockStatus = 'CRITICAL' AND s.units <= s.minimumLevel) OR " +
+           " (:stockStatus = 'OUT_OF_STOCK' AND s.units = 0))")
     Page<Sku> findSkusPaginated(
             @Param("pharmacyId") Long pharmacyId,
             @Param("search") String search,
             @Param("status") String status,
+            @Param("stockStatus") String stockStatus,
             Pageable pageable);
 
     // 2. Summary KPI counts
-    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId")
+    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active)")
     long countByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
-    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND s.units > s.reorderLevel")
+    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) AND s.units > s.reorderLevel")
     long countOptimalByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
-    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND s.units <= s.reorderLevel AND s.units > s.minimumLevel")
+    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) AND s.units <= s.reorderLevel AND s.units > s.minimumLevel")
     long countReorderNeededByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
-    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND s.units <= s.minimumLevel")
+    @Query("SELECT COUNT(s) FROM Sku s WHERE s.pharmacy.id = :pharmacyId AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) AND s.units <= s.minimumLevel")
     long countCriticalByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     // 3. Dropdown list for modals
-    @Query("SELECT s FROM Sku s LEFT JOIN FETCH s.libMedicine m WHERE s.pharmacy.id = :pharmacyId ORDER BY m.drugDescription ASC, s.brandName ASC")
+    @Query("SELECT s FROM Sku s LEFT JOIN FETCH s.libMedicine m WHERE s.pharmacy.id = :pharmacyId AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) ORDER BY m.drugDescription ASC, s.brandName ASC")
     List<Sku> findDropdownSkusByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 
     // 4. Procurement reorder-needed query
     @Query("SELECT s FROM Sku s LEFT JOIN s.libMedicine m WHERE " +
            "s.pharmacy.id = :pharmacyId AND " +
+           "(s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) AND " +
            "(s.units <= s.reorderLevel) AND " +
            "NOT EXISTS (" +
            "    SELECT 1 FROM OrderedItem oi " +
@@ -105,6 +111,7 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
            "LEFT JOIN FETCH p.facility f " +
            "WHERE m.drugCode IN :drugCodes " +
            "  AND p.id = :pharmacyId " +
+           "  AND (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) " +
            "  AND s.units > 0 " +
            "ORDER BY m.drugCode ASC, s.brandName ASC")
     List<Sku> findAvailableSkusByDrugCodesAndPharmacyId(

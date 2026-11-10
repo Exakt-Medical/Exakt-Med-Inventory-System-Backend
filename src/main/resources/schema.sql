@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS sku (
     minimum_level BIGINT NOT NULL,
     reorder_level BIGINT NOT NULL,
     maximum_level BIGINT NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Active',
     created_at TIMESTAMP(6),
     updated_at TIMESTAMP(6),
     CONSTRAINT uk_pharmacy_sku_name UNIQUE (pharmacy_id, name),
@@ -159,6 +160,10 @@ CREATE TABLE IF NOT EXISTS sku (
 CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_brand ON sku (pharmacy_id, brand_name);
 CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_units ON sku (pharmacy_id, units);
 CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_name ON sku (pharmacy_id, name);
+CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_status ON sku (pharmacy_id, status);
+
+-- Safe migration for existing schemas
+ALTER TABLE sku ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'Active';
 
 -- -----------------------------------------------------------------------------
 -- 5. PURCHASING, REPLENISHMENT & BATCH RECEIVING

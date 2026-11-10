@@ -54,6 +54,10 @@ public class RestockRequestService {
         Sku sku = skuRepository.findById(request.getSkuId())
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + request.getSkuId()));
 
+        if (sku.getStatus() == Sku.Status.Inactive) {
+            throw new RuntimeException("Cannot request restock for inactive SKU: " + sku.getName());
+        }
+
         facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
         Pharmacy pharmacy = pharmacyRepository.findById(request.getPharmacyId())
                 .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));

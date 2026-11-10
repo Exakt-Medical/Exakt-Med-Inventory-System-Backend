@@ -154,6 +154,10 @@ public class OneRxDispenseService {
             Sku lockedSku = skuRepository.findByPharmacyIdAndNameForUpdate(pharmacy.getId(), name)
                     .orElseThrow(() -> new IllegalArgumentException(
                             String.format("SKU '%s' not found for pharmacy '%s'.", name, pharmacy.getPharmacyName())));
+            if (lockedSku.getStatus() == Sku.Status.Inactive) {
+                throw new IllegalArgumentException(
+                        String.format("SKU '%s' is inactive and cannot be dispensed.", lockedSku.getName()));
+            }
             lockedSkusByName.put(name.toUpperCase(), lockedSku);
 
             long rawUnits = lockedSku.getUnits() != null ? lockedSku.getUnits() : 0L;

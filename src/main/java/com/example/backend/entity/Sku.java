@@ -18,7 +18,8 @@ import java.time.ZoneId;
     indexes = {
         @Index(name = "idx_sku_pharmacy_brand", columnList = "pharmacyId, brandName"),
         @Index(name = "idx_sku_pharmacy_units", columnList = "pharmacyId, units"),
-        @Index(name = "idx_sku_pharmacy_name", columnList = "pharmacyId, name")
+        @Index(name = "idx_sku_pharmacy_name", columnList = "pharmacyId, name"),
+        @Index(name = "idx_sku_pharmacy_status", columnList = "pharmacyId, status")
     }
 )
 @Getter
@@ -26,6 +27,11 @@ import java.time.ZoneId;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Sku {
+
+    public enum Status {
+        Active,
+        Inactive
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -66,6 +72,10 @@ public class Sku {
     @Column(nullable = false)
     private Long maximumLevel;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Status status = Status.Active;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -75,6 +85,9 @@ public class Sku {
     public void onCreate() {
         if (this.units == null) {
             this.units = 0L;
+        }
+        if (this.status == null) {
+            this.status = Status.Active;
         }
         this.createdAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         this.updatedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));

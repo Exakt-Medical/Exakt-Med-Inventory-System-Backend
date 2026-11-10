@@ -1,5 +1,6 @@
 package com.example.backend.dto.sku;
 
+import com.example.backend.entity.Sku;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -40,4 +41,6 @@ public class SkuRequestDto {
 
     @NotNull(message = "Maximum level is required")
     private Long maximumLevel;
+
+    private Sku.Status status;
 }
