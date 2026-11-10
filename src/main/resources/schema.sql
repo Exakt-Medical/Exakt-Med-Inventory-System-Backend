@@ -279,7 +279,7 @@ CREATE TABLE IF NOT EXISTS patients (
     contact_number VARCHAR(255),
     created_at TIMESTAMP(6) NOT NULL,
     updated_at TIMESTAMP(6),
-    CONSTRAINT fk_patients_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacy(id)
+    CONSTRAINT fk_patients_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacies(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_patients_pharmacy_name ON patients (pharmacy_id, name);
