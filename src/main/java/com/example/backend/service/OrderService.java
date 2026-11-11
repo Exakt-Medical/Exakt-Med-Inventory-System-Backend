@@ -15,7 +15,6 @@ import com.example.backend.entity.Supplier;
 import com.example.backend.repository.OrderRepository;
 import com.example.backend.repository.OrderedItemRepository;
 import com.example.backend.repository.PharmacyRepository;
-import com.example.backend.repository.RestockRequestRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.SupplierRepository;
 import com.example.backend.security.FacilityAccessGuard;
@@ -42,7 +41,6 @@ public class OrderService {
     private final SupplierRepository supplierRepository;
     private final SkuRepository skuRepository;
     private final PharmacyRepository pharmacyRepository;
-    private final RestockRequestRepository restockRequestRepository;
     private final AuditLogService auditLogService;
     private final FacilityAccessGuard facilityAccessGuard;
 
@@ -51,7 +49,6 @@ public class OrderService {
                         SupplierRepository supplierRepository,
                         SkuRepository skuRepository,
                         PharmacyRepository pharmacyRepository,
-                        RestockRequestRepository restockRequestRepository,
                         AuditLogService auditLogService,
                         FacilityAccessGuard facilityAccessGuard) {
         this.orderRepository = orderRepository;
@@ -59,7 +56,6 @@ public class OrderService {
         this.supplierRepository = supplierRepository;
         this.skuRepository = skuRepository;
         this.pharmacyRepository = pharmacyRepository;
-        this.restockRequestRepository = restockRequestRepository;
         this.auditLogService = auditLogService;
         this.facilityAccessGuard = facilityAccessGuard;
     }
@@ -144,24 +140,6 @@ public class OrderService {
         List<OrderedItem> savedItems = orderedItemRepository.saveAll(orderedItems);
         for (OrderedItem savedItem : savedItems) {
             itemResponses.add(mapToItemResponseDto(savedItem));
-        }
-
-        // If this purchase order fulfills Pharmacist Restock Requests, link them to the Order and matching OrderedItem
-        if (request.getRestockRequestIds() != null && !request.getRestockRequestIds().isEmpty()) {
-            final Order orderForRestock = savedOrder;
-            for (Long rId : request.getRestockRequestIds()) {
-                if (rId == null) continue;
-                restockRequestRepository.findById(rId).ifPresent(rr -> {
-                    rr.setOrder(orderForRestock);
-                    if (rr.getSku() != null) {
-                        savedItems.stream()
-                                .filter(si -> si.getSku() != null && si.getSku().getId().equals(rr.getSku().getId()))
-                                .findFirst()
-                                .ifPresent(rr::setOrderedItem);
-                    }
-                    restockRequestRepository.save(rr);
-                });
-            }
         }
 
         auditLogService.logAction(

@@ -25,7 +25,6 @@ public class DashboardService {
     private final OrderedItemRepository orderedItemRepository;
     private final SupplierRepository supplierRepository;
     private final PharmacyRepository pharmacyRepository;
-    private final RestockRequestRepository restockRequestRepository;
     private final FacilityAccessGuard facilityAccessGuard;
 
     private static final String[] PALETTE = {
@@ -40,7 +39,6 @@ public class DashboardService {
                             OrderedItemRepository orderedItemRepository,
                             SupplierRepository supplierRepository,
                             PharmacyRepository pharmacyRepository,
-                            RestockRequestRepository restockRequestRepository,
                             FacilityAccessGuard facilityAccessGuard) {
         this.skuRepository = skuRepository;
         this.batchRepository = batchRepository;
@@ -48,7 +46,6 @@ public class DashboardService {
         this.orderedItemRepository = orderedItemRepository;
         this.supplierRepository = supplierRepository;
         this.pharmacyRepository = pharmacyRepository;
-        this.restockRequestRepository = restockRequestRepository;
         this.facilityAccessGuard = facilityAccessGuard;
     }
 
@@ -198,7 +195,7 @@ public class DashboardService {
 
         LocalDate today = LocalDate.now();
 
-        // Collect SKUs that already have open/in-progress orders or restock requests
+        // Collect SKUs that already have open/in-progress orders
         // (Pending, Approved, Partially_Received) to prevent duplicate requisitions
         Set<Long> skusWithActiveOrders = new HashSet<>();
 
@@ -206,13 +203,6 @@ public class DashboardService {
         for (OrderedItem oi : activeItems) {
             if (oi.getSku() != null && oi.getSku().getId() != null) {
                 skusWithActiveOrders.add(oi.getSku().getId());
-            }
-        }
-
-        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByPharmacyId(pharmacyId);
-        for (RestockRequest rr : activeRestocks) {
-            if (rr.getSku() != null && rr.getSku().getId() != null) {
-                skusWithActiveOrders.add(rr.getSku().getId());
             }
         }
 

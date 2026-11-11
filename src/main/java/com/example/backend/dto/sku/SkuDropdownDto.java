@@ -23,7 +23,4 @@ public class SkuDropdownDto {
     private Long currentStock;
     private Long maximumLevel;
     private Sku.Status status;
-    private Boolean hasPendingRestock;
-    private Long pendingRestockUnits;
-    private String pendingRestockStatus;
 }

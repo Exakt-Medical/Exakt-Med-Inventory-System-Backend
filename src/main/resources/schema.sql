@@ -223,25 +223,6 @@ CREATE TABLE IF NOT EXISTS ordered_items (
     CONSTRAINT fk_ordered_items_sku FOREIGN KEY (sku_id) REFERENCES sku(id)
 );
 
--- Entity: RestockRequest (Scoped to Pharmacy)
-CREATE TABLE IF NOT EXISTS restock_requests (
-    id BIGSERIAL PRIMARY KEY,
-    pharmacy_id BIGINT NOT NULL,
-    sku_id BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
-    requested_units BIGINT NOT NULL,
-    reason VARCHAR(255),
-    order_id BIGINT,
-    ordered_item_id BIGINT,
-    created_at TIMESTAMP(6),
-    updated_at TIMESTAMP(6),
-    CONSTRAINT fk_restock_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacies(id),
-    CONSTRAINT fk_restock_sku FOREIGN KEY (sku_id) REFERENCES sku(id),
-    CONSTRAINT fk_restock_user FOREIGN KEY (user_id) REFERENCES users(id),
-    CONSTRAINT fk_restock_order FOREIGN KEY (order_id) REFERENCES orders(id),
-    CONSTRAINT fk_restock_ordered_item FOREIGN KEY (ordered_item_id) REFERENCES ordered_items(id)
-);
-
 -- Entity: Batch (Scoped to Pharmacy)
 CREATE TABLE IF NOT EXISTS batches (
     id BIGSERIAL PRIMARY KEY,
@@ -379,7 +360,6 @@ SELECT setval(pg_get_serial_sequence('sku', 'id'), COALESCE((SELECT MAX(id) FROM
 SELECT setval(pg_get_serial_sequence('suppliers', 'id'), COALESCE((SELECT MAX(id) FROM suppliers), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('orders', 'id'), COALESCE((SELECT MAX(id) FROM orders), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('ordered_items', 'id'), COALESCE((SELECT MAX(id) FROM ordered_items), 0) + 1, false);
-SELECT setval(pg_get_serial_sequence('restock_requests', 'id'), COALESCE((SELECT MAX(id) FROM restock_requests), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('batches', 'id'), COALESCE((SELECT MAX(id) FROM batches), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('dispensed_logs', 'id'), COALESCE((SELECT MAX(id) FROM dispensed_logs), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('inventory_transactions', 'id'), COALESCE((SELECT MAX(id) FROM inventory_transactions), 0) + 1, false);

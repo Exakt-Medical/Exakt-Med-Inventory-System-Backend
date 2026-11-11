@@ -15,7 +15,6 @@ import com.example.backend.entity.LibPackagingUnit;
 import com.example.backend.entity.Order;
 import com.example.backend.entity.OrderedItem;
 import com.example.backend.entity.Pharmacy;
-import com.example.backend.entity.RestockRequest;
 import com.example.backend.entity.Sku;
 import com.example.backend.entity.User;
 import com.example.backend.repository.DispensedLogRepository;
@@ -23,7 +22,6 @@ import com.example.backend.repository.LibMedicineRepository;
 import com.example.backend.repository.LibPackagingUnitRepository;
 import com.example.backend.repository.OrderedItemRepository;
 import com.example.backend.repository.PharmacyRepository;
-import com.example.backend.repository.RestockRequestRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.UserRepository;
 import com.example.backend.security.FacilityAccessGuard;
@@ -55,7 +53,6 @@ public class SkuService {
     private final InventoryTransactionService inventoryTransactionService;
     private final AuditLogService auditLogService;
     private final UserRepository userRepository;
-    private final RestockRequestRepository restockRequestRepository;
     private final OrderedItemRepository orderedItemRepository;
     private final LibPackagingUnitRepository libPackagingUnitRepository;
     private final DispensedLogRepository dispensedLogRepository;
@@ -68,7 +65,6 @@ public class SkuService {
                       InventoryTransactionService inventoryTransactionService,
                       AuditLogService auditLogService,
                       UserRepository userRepository,
-                      RestockRequestRepository restockRequestRepository,
                       OrderedItemRepository orderedItemRepository,
                       LibPackagingUnitRepository libPackagingUnitRepository,
                       DispensedLogRepository dispensedLogRepository,
@@ -80,7 +76,6 @@ public class SkuService {
         this.inventoryTransactionService = inventoryTransactionService;
         this.auditLogService = auditLogService;
         this.userRepository = userRepository;
-        this.restockRequestRepository = restockRequestRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.libPackagingUnitRepository = libPackagingUnitRepository;
         this.dispensedLogRepository = dispensedLogRepository;
@@ -587,33 +582,18 @@ public class SkuService {
         facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
 
         List<Sku> skus = skuRepository.findDropdownSkusByPharmacyId(pharmacyId);
-        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
-
-        return skus.stream().map(sku -> {
-            SkuOrderMetrics metrics = activeMetricsMap.get(sku.getId());
-            boolean hasActiveRestock = metrics != null && metrics.hasActiveRestockRequest;
-            String restockStatus = null;
-            if (hasActiveRestock && metrics.latestRestockRequest != null) {
-                restockStatus = metrics.latestRestockRequest.getOrder() == null
-                        ? "Requested"
-                        : metrics.latestRestockRequest.getOrder().getStatus().name();
-            }
-            return SkuDropdownDto.builder()
-                    .id(sku.getId())
-                    .sku(sku.getName())
-                    .name(sku.getName())
-                    .brandName(sku.getBrandName())
-                    .genericName(sku.getLibMedicine() != null ? sku.getLibMedicine().getDrugDescription() : "")
-                    .packagingUnit(sku.getPackagingUnit())
-                    .dosage(sku.getDosageStrength())
-                    .currentStock(sku.getUnits() != null ? sku.getUnits() : 0L)
-                    .maximumLevel(sku.getMaximumLevel())
-                    .status(sku.getStatus() != null ? sku.getStatus() : Sku.Status.Active)
-                    .hasPendingRestock(hasActiveRestock)
-                    .pendingRestockUnits(hasActiveRestock ? metrics.activeRestockUnits : 0L)
-                    .pendingRestockStatus(restockStatus)
-                    .build();
-        }).collect(Collectors.toList());
+        return skus.stream().map(sku -> SkuDropdownDto.builder()
+                .id(sku.getId())
+                .sku(sku.getName())
+                .name(sku.getName())
+                .brandName(sku.getBrandName())
+                .genericName(sku.getLibMedicine() != null ? sku.getLibMedicine().getDrugDescription() : "")
+                .packagingUnit(sku.getPackagingUnit())
+                .dosage(sku.getDosageStrength())
+                .currentStock(sku.getUnits() != null ? sku.getUnits() : 0L)
+                .maximumLevel(sku.getMaximumLevel())
+                .status(sku.getStatus() != null ? sku.getStatus() : Sku.Status.Active)
+                .build()).collect(Collectors.toList());
     }
 
     // 3. GET SKU BY ID
@@ -1058,9 +1038,6 @@ public class SkuService {
     private static class SkuOrderMetrics {
         long pendingUnits = 0L;
         long toReceiveUnits = 0L;
-        boolean hasActiveRestockRequest = false;
-        long activeRestockUnits = 0L;
-        RestockRequest latestRestockRequest = null;
         long expiredBatchesCount = 0L;
         long expiredUnits = 0L;
     }
@@ -1071,25 +1048,7 @@ public class SkuService {
         }
         Map<Long, SkuOrderMetrics> map = new HashMap<>();
 
-        // 1. Active Pharmacist Restock Requests
-        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByPharmacyId(pharmacyId);
-        for (RestockRequest rr : activeRestocks) {
-            if (rr.getSku() != null && rr.getSku().getId() != null) {
-                SkuOrderMetrics m = map.computeIfAbsent(rr.getSku().getId(), k -> new SkuOrderMetrics());
-                long units = rr.getRequestedUnits() != null ? rr.getRequestedUnits() : 0L;
-                m.hasActiveRestockRequest = true;
-                m.activeRestockUnits += units;
-                if (m.latestRestockRequest == null) {
-                    m.latestRestockRequest = rr;
-                }
-                // If it has not been assigned to a purchase order yet, add to pending units
-                if (rr.getOrder() == null) {
-                    m.pendingUnits += units;
-                }
-            }
-        }
-
-        // 2. Active Ordered Items (from POs, whether automated threshold PO or pharmacist requested PO)
+        // 1. Active Ordered Items (from POs)
         List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByPharmacyId(pharmacyId);
         for (OrderedItem oi : activeItems) {
             if (oi.getSku() != null && oi.getSku().getId() != null && oi.getOrder() != null) {
@@ -1104,7 +1063,7 @@ public class SkuService {
             }
         }
 
-        // 3. Expired batches needing deduction
+        // 2. Expired batches needing deduction
         Map<Long, long[]> expiredMetrics = batchService.getExpiredBatchMetrics(pharmacyId);
         for (Map.Entry<Long, long[]> entry : expiredMetrics.entrySet()) {
             SkuOrderMetrics m = map.computeIfAbsent(entry.getKey(), k -> new SkuOrderMetrics());
@@ -1120,18 +1079,6 @@ public class SkuService {
             return new SkuOrderMetrics();
         }
         SkuOrderMetrics m = new SkuOrderMetrics();
-        List<RestockRequest> activeRestocks = restockRequestRepository.findActiveRestockRequestsByPharmacyIdAndSkuId(pharmacyId, skuId);
-        for (RestockRequest rr : activeRestocks) {
-            long units = rr.getRequestedUnits() != null ? rr.getRequestedUnits() : 0L;
-            m.hasActiveRestockRequest = true;
-            m.activeRestockUnits += units;
-            if (m.latestRestockRequest == null) {
-                m.latestRestockRequest = rr;
-            }
-            if (rr.getOrder() == null) {
-                m.pendingUnits += units;
-            }
-        }
         List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByPharmacyIdAndSkuId(pharmacyId, skuId);
         for (OrderedItem oi : activeItems) {
             if (oi.getOrder() != null) {
@@ -1155,7 +1102,7 @@ public class SkuService {
         return m;
     }
 
-    // Helper: Map Sku entity to SkuResponseDto with restock enrichment
+    // Helper: Map Sku entity to SkuResponseDto with order enrichment
     private SkuResponseDto mapToResponseDto(Sku sku, String message, SkuOrderMetrics metrics) {
         SkuResponseDto dto = new SkuResponseDto();
         dto.setId(sku.getId());
@@ -1190,25 +1137,6 @@ public class SkuService {
 
         dto.setPendingUnits(pending);
         dto.setToReceiveUnits(toReceive);
-
-        // hasPendingRestock is strictly for pharmacist restock requests
-        // System threshold orders DO NOT block a pharmacist from requesting restock!
-        boolean hasActiveRestock = metrics != null && metrics.hasActiveRestockRequest;
-        dto.setHasPendingRestock(hasActiveRestock);
-        dto.setPendingRestockUnits(hasActiveRestock ? metrics.activeRestockUnits : 0L);
-
-        if (hasActiveRestock && metrics.latestRestockRequest != null) {
-            dto.setPendingRestockRequestId(metrics.latestRestockRequest.getId());
-            dto.setPendingRestockCreatedAt(metrics.latestRestockRequest.getCreatedAt());
-            String status = metrics.latestRestockRequest.getOrder() == null
-                    ? "Requested"
-                    : metrics.latestRestockRequest.getOrder().getStatus().name();
-            dto.setPendingRestockStatus(status);
-        } else {
-            dto.setPendingRestockRequestId(null);
-            dto.setPendingRestockCreatedAt(null);
-            dto.setPendingRestockStatus(null);
-        }
 
         long expiredCount = metrics != null ? metrics.expiredBatchesCount : 0L;
         long expiredUnits = metrics != null ? metrics.expiredUnits : 0L;

@@ -34,14 +34,9 @@ public class SkuResponseDto {
     private LocalDateTime updatedAt;
     private String message;
 
-    // Restock & Order Pipeline tracking
+    // Order Pipeline tracking
     private Long pendingUnits;
     private Long toReceiveUnits;
-    private Boolean hasPendingRestock;
-    private Long pendingRestockUnits;
-    private Long pendingRestockRequestId;
-    private LocalDateTime pendingRestockCreatedAt;
-    private String pendingRestockStatus;
 
     // Expired Batches tracking
     private Long expiredBatchesCount;
