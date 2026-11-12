@@ -65,6 +65,12 @@ public class Order {
         if (this.status == null) {
             this.status = Status.Pending;
         }
+        if (this.totalOrderedUnits == null) {
+            this.totalOrderedUnits = 0L;
+        }
+        if (this.totalPrice == null) {
+            this.totalPrice = 0L;
+        }
         createdAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         updatedAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
     }

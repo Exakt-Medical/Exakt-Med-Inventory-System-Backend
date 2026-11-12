@@ -223,6 +223,48 @@ CREATE TABLE IF NOT EXISTS ordered_items (
     CONSTRAINT fk_ordered_items_sku FOREIGN KEY (sku_id) REFERENCES sku(id)
 );
 
+-- Entity: ReorderQuotation (Scoped to Pharmacy)
+CREATE TABLE IF NOT EXISTS reorder_quotations (
+    id BIGSERIAL PRIMARY KEY,
+    quotation_number VARCHAR(255) NOT NULL UNIQUE,
+    pharmacy_id BIGINT NOT NULL,
+    supplier_id BIGINT NOT NULL,
+    user_id BIGINT,
+    order_id BIGINT,
+    priority VARCHAR(50) NOT NULL DEFAULT 'Normal',
+    status VARCHAR(50) NOT NULL DEFAULT 'Pending'
+        CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Cancelled')),
+    total_units BIGINT NOT NULL DEFAULT 0,
+    estimated_total_cost BIGINT NOT NULL DEFAULT 0,
+    notes VARCHAR(1000),
+    rejection_reason VARCHAR(1000),
+    created_at TIMESTAMP(6),
+    updated_at TIMESTAMP(6),
+    CONSTRAINT fk_quotations_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacies(id),
+    CONSTRAINT fk_quotations_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+    CONSTRAINT fk_quotations_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_quotations_order FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotations_pharmacy_created ON reorder_quotations (pharmacy_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_quotations_pharmacy_status ON reorder_quotations (pharmacy_id, status);
+CREATE INDEX IF NOT EXISTS idx_quotations_num ON reorder_quotations (quotation_number);
+
+-- Entity: ReorderQuotationItem
+CREATE TABLE IF NOT EXISTS reorder_quotation_items (
+    id BIGSERIAL PRIMARY KEY,
+    quotation_id BIGINT NOT NULL,
+    sku_id BIGINT NOT NULL,
+    requested_units BIGINT NOT NULL,
+    estimated_price BIGINT NOT NULL DEFAULT 0,
+    notes VARCHAR(500),
+    CONSTRAINT fk_quotation_items_quotation FOREIGN KEY (quotation_id) REFERENCES reorder_quotations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quotation_items_sku FOREIGN KEY (sku_id) REFERENCES sku(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON reorder_quotation_items (quotation_id);
+CREATE INDEX IF NOT EXISTS idx_quotation_items_sku ON reorder_quotation_items (sku_id);
+
 -- Entity: Batch (Scoped to Pharmacy)
 CREATE TABLE IF NOT EXISTS batches (
     id BIGSERIAL PRIMARY KEY,
@@ -360,6 +402,8 @@ SELECT setval(pg_get_serial_sequence('sku', 'id'), COALESCE((SELECT MAX(id) FROM
 SELECT setval(pg_get_serial_sequence('suppliers', 'id'), COALESCE((SELECT MAX(id) FROM suppliers), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('orders', 'id'), COALESCE((SELECT MAX(id) FROM orders), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('ordered_items', 'id'), COALESCE((SELECT MAX(id) FROM ordered_items), 0) + 1, false);
+SELECT setval(pg_get_serial_sequence('reorder_quotations', 'id'), COALESCE((SELECT MAX(id) FROM reorder_quotations), 0) + 1, false);
+SELECT setval(pg_get_serial_sequence('reorder_quotation_items', 'id'), COALESCE((SELECT MAX(id) FROM reorder_quotation_items), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('batches', 'id'), COALESCE((SELECT MAX(id) FROM batches), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('dispensed_logs', 'id'), COALESCE((SELECT MAX(id) FROM dispensed_logs), 0) + 1, false);
 SELECT setval(pg_get_serial_sequence('inventory_transactions', 'id'), COALESCE((SELECT MAX(id) FROM inventory_transactions), 0) + 1, false);
