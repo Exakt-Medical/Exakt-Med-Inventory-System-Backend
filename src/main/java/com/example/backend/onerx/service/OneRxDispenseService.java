@@ -1,6 +1,7 @@
 package com.example.backend.onerx.service;
 
 import com.example.backend.entity.AuditLog;
+import com.example.backend.entity.DispensedLog;
 import com.example.backend.entity.Facility;
 import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.InventoryTransaction;
@@ -9,6 +10,7 @@ import com.example.backend.entity.User;
 import com.example.backend.onerx.dto.OneRxDispenseRequestDto;
 import com.example.backend.onerx.dto.OneRxDispenseResponseDto;
 import com.example.backend.repository.BatchRepository;
+import com.example.backend.repository.DispensedLogRepository;
 import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.SkuRepository;
@@ -45,6 +47,7 @@ public class OneRxDispenseService {
     private final BatchService batchService;
     private final InventoryTransactionService inventoryTransactionService;
     private final InventoryTransactionRepository inventoryTransactionRepository;
+    private final DispensedLogRepository dispensedLogRepository;
     private final AuditLogService auditLogService;
     private final UserRepository userRepository;
     private final FacilityAccessGuard facilityAccessGuard;
@@ -55,6 +58,7 @@ public class OneRxDispenseService {
                                 BatchService batchService,
                                 InventoryTransactionService inventoryTransactionService,
                                 InventoryTransactionRepository inventoryTransactionRepository,
+                                DispensedLogRepository dispensedLogRepository,
                                 AuditLogService auditLogService,
                                 UserRepository userRepository,
                                 FacilityAccessGuard facilityAccessGuard) {
@@ -64,6 +68,7 @@ public class OneRxDispenseService {
         this.batchService = batchService;
         this.inventoryTransactionService = inventoryTransactionService;
         this.inventoryTransactionRepository = inventoryTransactionRepository;
+        this.dispensedLogRepository = dispensedLogRepository;
         this.auditLogService = auditLogService;
         this.userRepository = userRepository;
         this.facilityAccessGuard = facilityAccessGuard;
@@ -212,6 +217,9 @@ public class OneRxDispenseService {
         String patientLabel = (request.getPatientName() != null && !request.getPatientName().isBlank())
                 ? request.getPatientName().trim()
                 : "N/A";
+        String contactNumberLabel = (request.getContactNumber() != null && !request.getContactNumber().isBlank())
+                ? request.getContactNumber().trim()
+                : "N/A";
         String dispensedByLabel = (request.getDispensedBy() != null && !request.getDispensedBy().isBlank())
                 ? request.getDispensedBy().trim()
                 : (currentUser != null ? currentUser.getUsername() : "OneRx Integration");
@@ -331,7 +339,19 @@ public class OneRxDispenseService {
             // 2. Decrement SKU on-hand inventory
             long finalSkuUnits = Math.max(0L, (sku.getUnits() != null ? sku.getUnits() : 0L) - unitsToDispense);
             sku.setUnits(finalSkuUnits);
-            skuRepository.save(sku);
+            Sku savedSku = skuRepository.save(sku);
+
+            // 3. Create DispensedLog with Status.Received
+            DispensedLog dispensedLog = new DispensedLog();
+            dispensedLog.setSku(savedSku);
+            dispensedLog.setPatientName(patientLabel);
+            dispensedLog.setContactNumber(contactNumberLabel);
+            dispensedLog.setUnitsDispensed(unitsToDispense);
+            dispensedLog.setStatus(DispensedLog.Status.Received);
+            dispensedLog.setDispensedBy(dispensedByLabel);
+            dispensedLog.setDispensedAt(eventTime);
+            dispensedLog.setReceivedAt(eventTime);
+            dispensedLogRepository.save(dispensedLog);
         }
 
         // ==========================================
@@ -371,7 +391,22 @@ public class OneRxDispenseService {
     }
 
     private Optional<Pharmacy> resolvePharmacy(String pharmacyCode) {
-        return pharmacyRepository.findByPharmacyCode(pharmacyCode);
+        if (pharmacyCode == null || pharmacyCode.trim().isBlank()) {
+            return Optional.empty();
+        }
+        String trimmed = pharmacyCode.trim();
+        // 1. Try resolving by pharmacyCode
+        Optional<Pharmacy> pharmacy = pharmacyRepository.findByPharmacyCodeIgnoreCase(trimmed);
+        if (pharmacy.isPresent()) {
+            return pharmacy;
+        }
+        // 2. Fallback: try parsing as numeric pharmacyId (e.g. "1")
+        try {
+            Long pharmacyId = Long.parseLong(trimmed);
+            return pharmacyRepository.findById(pharmacyId);
+        } catch (NumberFormatException ignored) {
+        }
+        return Optional.empty();
     }
 
     private User getCurrentUser() {
