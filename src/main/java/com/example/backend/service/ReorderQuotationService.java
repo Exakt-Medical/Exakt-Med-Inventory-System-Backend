@@ -588,6 +588,32 @@ public class ReorderQuotationService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
+    @PreAuthorize("isAuthenticated()")
+    public ReorderQuotationSummaryDto getQuotationSummary(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is strictly required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        if (!pharmacyRepository.existsById(pharmacyId)) {
+            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
+        }
+
+        long total = quotationRepository.countByPharmacyId(pharmacyId);
+        long pending = quotationRepository.countByPharmacyIdAndStatus(pharmacyId, ReorderQuotation.Status.Pending);
+        long approved = quotationRepository.countByPharmacyIdAndStatus(pharmacyId, ReorderQuotation.Status.Approved);
+        long rejected = quotationRepository.countByPharmacyIdAndStatus(pharmacyId, ReorderQuotation.Status.Rejected);
+        long cancelled = quotationRepository.countByPharmacyIdAndStatus(pharmacyId, ReorderQuotation.Status.Cancelled);
+
+        return ReorderQuotationSummaryDto.builder()
+                .totalQuotations(total)
+                .pendingCount(pending)
+                .approvedCount(approved)
+                .rejectedCount(rejected)
+                .cancelledCount(cancelled)
+                .build();
+    }
+
     private User getCurrentUser() {
         try {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();

@@ -1,6 +1,7 @@
 package com.example.backend.controller;
 
 import com.example.backend.dto.common.PageResponseDto;
+import com.example.backend.dto.sku.ReorderNeededSummaryDto;
 import com.example.backend.dto.sku.SkuDropdownDto;
 import com.example.backend.dto.sku.SkuRequestDto;
 import com.example.backend.dto.sku.SkuResponseDto;
@@ -78,15 +79,34 @@ public class SkuController {
         return ResponseEntity.ok(skuService.getDropdownSkus(pharmacyId));
     }
 
-    // 2d. GET SKUS THAT NEED REORDERING (For Procurement Purchase Orders)
+    // 2c. GET REORDER NEEDED KPI SUMMARY
+    @GetMapping("/reorder-needed/summary")
+    @Operation(summary = "Get Reorder Needed KPI Summary", description = "Returns total reorder count, critical shortage count, and reorder point triggered count for SKUs without active POs.")
+    public ResponseEntity<ReorderNeededSummaryDto> getReorderNeededSummary(
+            @Parameter(description = "ID of the pharmacy", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(skuService.getReorderNeededSummary(pharmacyId));
+    }
+
+    // 2d. GET SKUS THAT NEED REORDERING (For Procurement Purchase Orders & Pharmacist Reorder Quotations)
     @GetMapping("/reorder-needed")
-    @Operation(summary = "Get SKUs Needing Reorder", description = "Returns SKUs whose current stock has dropped below minimum stock level and does not already have an active pending/approved purchase order.")
-    public ResponseEntity<List<SkuResponseDto>> getReorderNeededSkus(
+    @Operation(summary = "Get SKUs Needing Reorder Paginated", description = "Returns paginated list of SKUs whose current stock has dropped below reorder level and does not already have an active pending/approved purchase order.")
+    public ResponseEntity<PageResponseDto<SkuResponseDto>> getReorderNeededSkus(
             @Parameter(description = "ID of the pharmacy", required = true)
             @RequestParam Long pharmacyId,
-            @Parameter(description = "Optional search query filter")
-            @RequestParam(required = false) String search) {
-        return ResponseEntity.ok(skuService.getReorderNeededSkus(pharmacyId, search));
+            @Parameter(description = "Optional search query filter (matches brand name or generic name)")
+            @RequestParam(required = false) String search,
+            @Parameter(description = "Stock status / urgency filter (ALL, CRITICAL, REORDER)")
+            @RequestParam(required = false, defaultValue = "ALL") String stockStatus,
+            @Parameter(description = "Page index (0-based)")
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size")
+            @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "Sort property (genericName, brandName, units, reorder, critical)")
+            @RequestParam(defaultValue = "genericName") String sortBy,
+            @Parameter(description = "Sort direction (ASC, DESC)")
+            @RequestParam(defaultValue = "ASC") String sortDir) {
+        return ResponseEntity.ok(skuService.getReorderNeededSkus(pharmacyId, search, stockStatus, page, size, sortBy, sortDir));
     }
 
     // 4. GET SKU BY ID

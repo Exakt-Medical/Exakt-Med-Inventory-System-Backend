@@ -20,6 +20,8 @@ public interface ReorderQuotationRepository extends JpaRepository<ReorderQuotati
 
     List<ReorderQuotation> findByPharmacyIdAndStatusOrderByCreatedAtDesc(Long pharmacyId, ReorderQuotation.Status status);
 
+    long countByPharmacyId(Long pharmacyId);
+
     long countByPharmacyIdAndStatus(Long pharmacyId, ReorderQuotation.Status status);
 
     @Query("SELECT q FROM ReorderQuotation q " +

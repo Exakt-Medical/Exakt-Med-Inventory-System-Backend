@@ -5,6 +5,7 @@ import com.example.backend.dto.reorderQuotation.ConvertQuotationToOrderRequestDt
 import com.example.backend.dto.reorderQuotation.RejectQuotationRequestDto;
 import com.example.backend.dto.reorderQuotation.ReorderQuotationRequestDto;
 import com.example.backend.dto.reorderQuotation.ReorderQuotationResponseDto;
+import com.example.backend.dto.reorderQuotation.ReorderQuotationSummaryDto;
 import com.example.backend.service.ReorderQuotationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -57,6 +58,15 @@ public class ReorderQuotationController {
             @RequestParam(defaultValue = "DESC") String sortDir) {
         return ResponseEntity.ok(quotationService.getQuotationsPaginated(
                 pharmacyId, supplierId, status, priority, search, page, size, sortBy, sortDir));
+    }
+
+    // 2b. GET REORDER QUOTATIONS KPI SUMMARY
+    @GetMapping("/summary")
+    @Operation(summary = "Get Reorder Quotations KPI Summary", description = "Returns total, pending, approved, rejected, and cancelled counts for quotations in a pharmacy.")
+    public ResponseEntity<ReorderQuotationSummaryDto> getQuotationSummary(
+            @Parameter(description = "ID of the pharmacy", required = true)
+            @RequestParam Long pharmacyId) {
+        return ResponseEntity.ok(quotationService.getQuotationSummary(pharmacyId));
     }
 
     // 3. GET QUOTATION BY ID

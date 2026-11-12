@@ -1,6 +1,7 @@
 package com.example.backend.service;
 
 import com.example.backend.dto.common.PageResponseDto;
+import com.example.backend.dto.sku.ReorderNeededSummaryDto;
 import com.example.backend.dto.sku.SkuDropdownDto;
 import com.example.backend.dto.sku.SkuRequestDto;
 import com.example.backend.dto.sku.SkuResponseDto;
@@ -1015,9 +1016,16 @@ public class SkuService {
     }
 
     // 7. GET SKUS THAT NEED REORDERING (units <= reorderLevel, excluding active Pending/Approved orders)
-    @Transactional
+    @Transactional(readOnly = true)
     @PreAuthorize("isAuthenticated()")
-    public List<SkuResponseDto> getReorderNeededSkus(Long pharmacyId, String search) {
+    public PageResponseDto<SkuResponseDto> getReorderNeededSkus(
+            Long pharmacyId,
+            String search,
+            String stockStatus,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
         if (pharmacyId == null) {
             throw new RuntimeException("Pharmacy ID is strictly required.");
         }
@@ -1027,12 +1035,84 @@ public class SkuService {
         }
 
         batchService.markPastDueBatchesAsExpired(pharmacyId);
+
+        int pageIndex = Math.max(0, page);
+        int pageSize = size > 0 ? size : 10;
+
+        Sort.Direction direction = "DESC".equalsIgnoreCase(sortDir) ? Sort.Direction.DESC : Sort.Direction.ASC;
+        String sortProperty = (sortBy != null && !sortBy.isBlank()) ? sortBy.trim() : "genericName";
+
+        Sort sort;
+        if ("genericName".equalsIgnoreCase(sortProperty)
+                || "drugDescription".equalsIgnoreCase(sortProperty)
+                || "libMedicine.drugDescription".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "libMedicine.drugDescription").and(Sort.by(direction, "brandName"));
+        } else if ("brandName".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "brandName");
+        } else if ("units".equalsIgnoreCase(sortProperty) || "currentStock".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "units");
+        } else if ("reorder".equalsIgnoreCase(sortProperty) || "reorderLevel".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "reorderLevel");
+        } else if ("critical".equalsIgnoreCase(sortProperty) || "minimumLevel".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "minimumLevel");
+        } else if ("urgency".equalsIgnoreCase(sortProperty) || "status".equalsIgnoreCase(sortProperty)) {
+            sort = Sort.by(direction, "minimumLevel").and(Sort.by(direction, "units"));
+        } else {
+            sort = Sort.by(direction, "name");
+        }
+
+        Pageable pageable = PageRequest.of(pageIndex, pageSize, sort);
         String query = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        List<Sku> skus = skuRepository.findReorderNeededSkus(pharmacyId, query);
+        String statusFilter = (stockStatus != null && !stockStatus.isBlank()) ? stockStatus.trim().toUpperCase() : "ALL";
+
+        Page<Sku> skuPage = skuRepository.findReorderNeededSkus(pharmacyId, query, statusFilter, pageable);
         Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
-        return skus.stream()
-                .map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())))
-                .collect(Collectors.toList());
+
+        Page<SkuResponseDto> dtoPage = skuPage.map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())));
+        return PageResponseDto.from(dtoPage);
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("isAuthenticated()")
+    public PageResponseDto<SkuResponseDto> getReorderNeededSkus(
+            Long pharmacyId,
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+        return getReorderNeededSkus(pharmacyId, search, "ALL", page, size, sortBy, sortDir);
+    }
+
+    @Transactional(readOnly = true)
+    @PreAuthorize("isAuthenticated()")
+    public PageResponseDto<SkuResponseDto> getReorderNeededSkus(Long pharmacyId, String search) {
+        return getReorderNeededSkus(pharmacyId, search, "ALL", 0, 10, "genericName", "ASC");
+    }
+
+    // 7b. GET REORDER NEEDED KPI SUMMARY (Counts excluding active Pending/Approved/Partially_Received orders)
+    @Transactional(readOnly = true)
+    @PreAuthorize("isAuthenticated()")
+    public ReorderNeededSummaryDto getReorderNeededSummary(Long pharmacyId) {
+        if (pharmacyId == null) {
+            throw new RuntimeException("Pharmacy ID is strictly required.");
+        }
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+        if (!pharmacyRepository.existsById(pharmacyId)) {
+            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
+        }
+
+        batchService.markPastDueBatchesAsExpired(pharmacyId);
+
+        long total = skuRepository.countTotalReorderNeededByPharmacyId(pharmacyId);
+        long critical = skuRepository.countCriticalReorderNeededByPharmacyId(pharmacyId);
+        long reorderOnly = Math.max(0, total - critical);
+
+        return ReorderNeededSummaryDto.builder()
+                .totalReorderCount(total)
+                .criticalCount(critical)
+                .reorderOnlyCount(reorderOnly)
+                .build();
     }
 
     private static class SkuOrderMetrics {
