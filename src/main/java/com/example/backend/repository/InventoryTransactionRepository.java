@@ -43,6 +43,7 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
            "WHERE tx.pharmacy.id = :pharmacyId " +
            "AND (:skuId IS NULL OR tx.sku.id = :skuId) " +
            "AND (:types IS NULL OR tx.transactionType IN :types) " +
+           "AND (:reason IS NULL OR :reason = '' OR :reason = 'ALL' OR tx.reason = :reason) " +
            "AND (:search IS NULL OR :search = '' OR " +
            "     LOWER(tx.referenceNumber) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "     LOWER(tx.batchNum) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -54,6 +55,7 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
            "WHERE tx.pharmacy.id = :pharmacyId " +
            "AND (:skuId IS NULL OR tx.sku.id = :skuId) " +
            "AND (:types IS NULL OR tx.transactionType IN :types) " +
+           "AND (:reason IS NULL OR :reason = '' OR :reason = 'ALL' OR tx.reason = :reason) " +
            "AND (:search IS NULL OR :search = '' OR " +
            "     LOWER(tx.referenceNumber) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "     LOWER(tx.batchNum) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -64,8 +66,18 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
             @Param("pharmacyId") Long pharmacyId,
             @Param("skuId") Long skuId,
             @Param("types") List<InventoryTransaction.Type> types,
+            @Param("reason") String reason,
             @Param("search") String search,
             Pageable pageable);
+
+    @Query("SELECT DISTINCT tx.reason FROM InventoryTransaction tx " +
+           "WHERE tx.pharmacy.id = :pharmacyId " +
+           "AND (:types IS NULL OR tx.transactionType IN :types) " +
+           "AND tx.reason IS NOT NULL AND TRIM(tx.reason) <> '' " +
+           "ORDER BY tx.reason ASC")
+    List<String> findDistinctReasonsByPharmacyId(
+            @Param("pharmacyId") Long pharmacyId,
+            @Param("types") List<InventoryTransaction.Type> types);
 
     @Query("SELECT " +
            "COUNT(tx), " +

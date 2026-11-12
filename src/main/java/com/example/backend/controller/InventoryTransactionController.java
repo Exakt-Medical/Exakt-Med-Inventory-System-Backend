@@ -44,10 +44,10 @@ public class InventoryTransactionController {
         return ResponseEntity.ok(inventoryTransactionService.getLedgerForSku(pharmacyId, skuId, startDate, endDate));
     }
 
-    // 3. GET TRANSACTIONS (PAGINATED, WITH PHARMACY, SKU, TYPE, AND KEYWORD FILTERS)
+    // 3. GET TRANSACTIONS (PAGINATED, WITH PHARMACY, SKU, TYPE, REASON, AND KEYWORD FILTERS)
     @GetMapping
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
-    @Operation(summary = "Get Inventory Transactions Paginated", description = "Retrieves paginated transactions across the pharmacy, optionally filtered by SKU, transaction types and search keyword.")
+    @Operation(summary = "Get Inventory Transactions Paginated", description = "Retrieves paginated transactions across the pharmacy, optionally filtered by SKU, transaction types, reason, and search keyword.")
     public ResponseEntity<PageResponseDto<InventoryTransactionResponseDto>> getTransactions(
             @Parameter(description = "Operating pharmacy ID", required = true)
             @RequestParam Long pharmacyId,
@@ -55,6 +55,8 @@ public class InventoryTransactionController {
             @RequestParam(required = false) Long skuId,
             @Parameter(description = "Optional transaction type filter (e.g. ADJUSTMENT_ADD, ADJUSTMENT_SUB, DISPENSE)")
             @RequestParam(required = false) List<InventoryTransaction.Type> types,
+            @Parameter(description = "Optional reason filter")
+            @RequestParam(required = false) String reason,
             @Parameter(description = "Optional keyword search across reference, batchNum, SKU name, or reason")
             @RequestParam(required = false) String search,
             @Parameter(description = "Page index (0-based)")
@@ -66,7 +68,7 @@ public class InventoryTransactionController {
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "DESC") String sortDir) {
         return ResponseEntity.ok(inventoryTransactionService.getTransactionsPaginated(
-                pharmacyId, skuId, types, search, page, size, sortBy, sortDir));
+                pharmacyId, skuId, types, reason, search, page, size, sortBy, sortDir));
     }
 
     // 4. GET TRANSACTIONS BY SKU (PAGINATED)
@@ -80,6 +82,8 @@ public class InventoryTransactionController {
             @RequestParam Long pharmacyId,
             @Parameter(description = "Optional transaction type filter")
             @RequestParam(required = false) List<InventoryTransaction.Type> types,
+            @Parameter(description = "Optional reason filter")
+            @RequestParam(required = false) String reason,
             @Parameter(description = "Optional keyword search")
             @RequestParam(required = false) String search,
             @Parameter(description = "Page index (0-based)")
@@ -91,10 +95,22 @@ public class InventoryTransactionController {
             @Parameter(description = "Sort direction (ASC, DESC)")
             @RequestParam(defaultValue = "DESC") String sortDir) {
         return ResponseEntity.ok(inventoryTransactionService.getTransactionsPaginated(
-                pharmacyId, skuId, types, search, page, size, sortBy, sortDir));
+                pharmacyId, skuId, types, reason, search, page, size, sortBy, sortDir));
     }
 
-    // 5. GET TRANSACTION SUMMARY KPIS
+    // 5. GET DISTINCT REASONS FOR FILTER DROPDOWN
+    @GetMapping("/reasons")
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
+    @Operation(summary = "Get Distinct Transaction Reasons", description = "Retrieves distinct adjustment reasons recorded for a pharmacy, optionally filtered by transaction types.")
+    public ResponseEntity<List<String>> getDistinctReasons(
+            @Parameter(description = "Operating pharmacy ID", required = true)
+            @RequestParam Long pharmacyId,
+            @Parameter(description = "Optional transaction type filter (e.g. ADJUSTMENT_ADD, ADJUSTMENT_SUB, DISPENSE)")
+            @RequestParam(required = false) List<InventoryTransaction.Type> types) {
+        return ResponseEntity.ok(inventoryTransactionService.getDistinctReasons(pharmacyId, types));
+    }
+
+    // 6. GET TRANSACTION SUMMARY KPIS
     @GetMapping("/summary")
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     @Operation(summary = "Get Inventory Transaction Summary KPIs", description = "Returns aggregated pharmacy-level transaction metrics (additions, deductions, net delta) for KPI cards.")

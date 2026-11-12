@@ -257,13 +257,14 @@ public class InventoryTransactionService {
     }
 
     /**
-     * Retrieves transactions with server-side pagination, pharmacy/sku scoping, and type/search filters.
+     * Retrieves transactions with server-side pagination, pharmacy/sku scoping, and type/reason/search filters.
      */
     @Transactional(readOnly = true)
     public PageResponseDto<InventoryTransactionResponseDto> getTransactionsPaginated(
             Long pharmacyId,
             Long skuId,
             List<InventoryTransaction.Type> types,
+            String reason,
             String search,
             int page,
             int size,
@@ -285,13 +286,43 @@ public class InventoryTransactionService {
         Pageable pageable = PageRequest.of(pageIndex, pageSize, Sort.by(direction, sortProperty));
 
         List<InventoryTransaction.Type> filterTypes = (types != null && !types.isEmpty()) ? types : null;
+        String cleanReason = (reason != null && !reason.trim().isBlank() && !"ALL".equalsIgnoreCase(reason.trim()))
+                ? reason.trim() : null;
         String cleanSearch = (search != null && !search.trim().isBlank()) ? search.trim() : null;
 
         Page<InventoryTransaction> txPage = inventoryTransactionRepository.findTransactionsPaginated(
-                pharmacyId, skuId, filterTypes, cleanSearch, pageable);
+                pharmacyId, skuId, filterTypes, cleanReason, cleanSearch, pageable);
 
         Page<InventoryTransactionResponseDto> dtoPage = txPage.map(this::mapToDto);
         return PageResponseDto.from(dtoPage);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponseDto<InventoryTransactionResponseDto> getTransactionsPaginated(
+            Long pharmacyId,
+            Long skuId,
+            List<InventoryTransaction.Type> types,
+            String search,
+            int page,
+            int size,
+            String sortBy,
+            String sortDir) {
+        return getTransactionsPaginated(pharmacyId, skuId, types, null, search, page, size, sortBy, sortDir);
+    }
+
+    /**
+     * Retrieves distinct adjustment reasons present in transactions for the given pharmacy and types.
+     */
+    @Transactional(readOnly = true)
+    public List<String> getDistinctReasons(Long pharmacyId, List<InventoryTransaction.Type> types) {
+        if (pharmacyId == null) {
+            throw new IllegalArgumentException("Pharmacy ID is strictly required to query distinct reasons.");
+        }
+
+        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
+
+        List<InventoryTransaction.Type> filterTypes = (types != null && !types.isEmpty()) ? types : null;
+        return inventoryTransactionRepository.findDistinctReasonsByPharmacyId(pharmacyId, filterTypes);
     }
 
     /**
