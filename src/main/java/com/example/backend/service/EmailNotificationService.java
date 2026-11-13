@@ -17,6 +17,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
 import java.util.List;
 
 @Service
@@ -31,7 +32,7 @@ public class EmailNotificationService {
     @Value("${app.mail.enabled:true}")
     private boolean mailEnabled;
 
-    @Value("${app.mail.from:${spring.mail.username:}}")
+    @Value("${app.mail.from}")
     private String mailFrom;
 
     @Value("${app.frontend.url:http://localhost:5173}")
@@ -81,18 +82,8 @@ public class EmailNotificationService {
             String htmlBody = buildQuotationHtmlTemplate(quotation, facilityName);
 
             // Dispatch MimeMessage via SMTP
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-
-            String senderAddress = (mailFrom != null && !mailFrom.trim().isBlank()) ? mailFrom.trim() : "noreply@exaktmed.com";
-            helper.setFrom(senderAddress, "Exakt Med Inventory System");
-            helper.setTo(recipientEmails.toArray(new String[0]));
-            helper.setSubject(subject);
-            helper.setText(htmlBody, true);
-
-            mailSender.send(mimeMessage);
-            log.info("Successfully dispatched quotation email alert for {} to {} recipient(s): {}",
-                    quotation.getQuotationNumber(), recipientEmails.size(), recipientEmails);
+            sendHtmlEmail(recipientEmails, subject, htmlBody,
+                    "quotation email alert for " + quotation.getQuotationNumber());
 
         } catch (Exception ex) {
             log.error("Failed to send quotation alert email for quotation {}: {}",
@@ -228,18 +219,8 @@ public class EmailNotificationService {
             String htmlBody = buildPurchaseOrderHtmlTemplate(order, facilityName, creatorName);
 
             // Dispatch MimeMessage via SMTP
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-
-            String senderAddress = (mailFrom != null && !mailFrom.trim().isBlank()) ? mailFrom.trim() : "noreply@exaktmed.com";
-            helper.setFrom(senderAddress, "Exakt Med Inventory System");
-            helper.setTo(adminEmails.toArray(new String[0]));
-            helper.setSubject(subject);
-            helper.setText(htmlBody, true);
-
-            mailSender.send(mimeMessage);
-            log.info("Successfully dispatched PO creation email alert for {} to {} Admin recipient(s): {}",
-                    order.getPurchaseOrderNum(), adminEmails.size(), adminEmails);
+            sendHtmlEmail(adminEmails, subject, htmlBody,
+                    "PO creation email alert for " + order.getPurchaseOrderNum());
 
         } catch (Exception ex) {
             log.error("Failed to send PO creation alert email for PO {}: {}",
@@ -393,18 +374,8 @@ public class EmailNotificationService {
             String htmlBody = buildOrderStatusUpdateHtmlTemplate(order, status, notes, facilityName, reviewerName);
 
             // Dispatch MimeMessage via SMTP
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-
-            String senderAddress = (mailFrom != null && !mailFrom.trim().isBlank()) ? mailFrom.trim() : "noreply@exaktmed.com";
-            helper.setFrom(senderAddress, "Exakt Med Inventory System");
-            helper.setTo(procurementEmails.toArray(new String[0]));
-            helper.setSubject(subject);
-            helper.setText(htmlBody, true);
-
-            mailSender.send(mimeMessage);
-            log.info("Successfully dispatched PO status update ({}) email for {} to {} Procurement recipient(s): {}",
-                    statusLabel, order.getPurchaseOrderNum(), procurementEmails.size(), procurementEmails);
+            sendHtmlEmail(procurementEmails, subject, htmlBody,
+                    "PO status update (" + statusLabel + ") email for " + order.getPurchaseOrderNum());
 
         } catch (Exception ex) {
             log.error("Failed to send PO status update email for PO {}: {}",
@@ -609,18 +580,8 @@ public class EmailNotificationService {
             String htmlBody = buildQuotationStatusUpdateHtmlTemplate(quotation, facilityName, reviewerName);
 
             // Dispatch MimeMessage via SMTP
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-
-            String senderAddress = (mailFrom != null && !mailFrom.trim().isBlank()) ? mailFrom.trim() : "noreply@exaktmed.com";
-            helper.setFrom(senderAddress, "Exakt Med Inventory System");
-            helper.setTo(recipientEmails.toArray(new String[0]));
-            helper.setSubject(subject);
-            helper.setText(htmlBody, true);
-
-            mailSender.send(mimeMessage);
-            log.info("Successfully dispatched quotation status update ({}) email for {} to {} recipient(s): {}",
-                    statusLabel, quotation.getQuotationNumber(), recipientEmails.size(), recipientEmails);
+            sendHtmlEmail(recipientEmails, subject, htmlBody,
+                    "quotation status update (" + statusLabel + ") email for " + quotation.getQuotationNumber());
 
         } catch (Exception ex) {
             log.error("Failed to send quotation status update email for quotation {}: {}",
@@ -777,5 +738,20 @@ public class EmailNotificationService {
                 reviewUrl,
                 buttonColor
         );
+    }
+
+    private void sendHtmlEmail(Collection<String> recipients, String subject, String htmlBody, String contextLabel) throws Exception {
+        MimeMessage mimeMessage = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
+
+        String senderAddress = (mailFrom != null && !mailFrom.trim().isBlank()) ? mailFrom.trim() : "noreply@exaktmed.com";
+        helper.setFrom(senderAddress, "Exakt Med Inventory System");
+        helper.setTo(recipients.toArray(new String[0]));
+        helper.setSubject(subject);
+        helper.setText(htmlBody, true);
+
+        mailSender.send(mimeMessage);
+        log.info("Successfully dispatched {} (from: {}) to {} recipient(s): {}",
+                contextLabel, senderAddress, recipients.size(), recipients);
     }
 }
