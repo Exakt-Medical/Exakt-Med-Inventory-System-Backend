@@ -17,12 +17,15 @@ import com.example.backend.repository.OrderedItemRepository;
 import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.SupplierRepository;
+import com.example.backend.repository.UserRepository;
 import com.example.backend.security.FacilityAccessGuard;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,23 +44,29 @@ public class OrderService {
     private final SupplierRepository supplierRepository;
     private final SkuRepository skuRepository;
     private final PharmacyRepository pharmacyRepository;
+    private final UserRepository userRepository;
     private final AuditLogService auditLogService;
     private final FacilityAccessGuard facilityAccessGuard;
+    private final EmailNotificationService emailNotificationService;
 
     public OrderService(OrderRepository orderRepository,
                         OrderedItemRepository orderedItemRepository,
                         SupplierRepository supplierRepository,
                         SkuRepository skuRepository,
                         PharmacyRepository pharmacyRepository,
+                        UserRepository userRepository,
                         AuditLogService auditLogService,
-                        FacilityAccessGuard facilityAccessGuard) {
+                        FacilityAccessGuard facilityAccessGuard,
+                        EmailNotificationService emailNotificationService) {
         this.orderRepository = orderRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.supplierRepository = supplierRepository;
         this.skuRepository = skuRepository;
         this.pharmacyRepository = pharmacyRepository;
+        this.userRepository = userRepository;
         this.auditLogService = auditLogService;
         this.facilityAccessGuard = facilityAccessGuard;
+        this.emailNotificationService = emailNotificationService;
     }
 
     // 1. CREATE PURCHASE ORDER REQUEST
@@ -156,6 +165,12 @@ public class OrderService {
 
         OrderResponseDto response = mapToOrderResponseDto(savedOrder, itemResponses);
         response.setMessage("Purchase order request created successfully.");
+
+        // Asynchronously notify assigned Admin users via email
+        String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : "";
+        String creatorName = resolveCurrentUserName();
+        emailNotificationService.notifyAdminOfNewPurchaseOrder(response, facilityName, creatorName);
+
         return response;
     }
 
@@ -454,5 +469,19 @@ public class OrderService {
         dto.setCreatedAt(order.getCreatedAt());
         dto.setUpdatedAt(order.getUpdatedAt());
         return dto;
+    }
+
+    private String resolveCurrentUserName() {
+        try {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.isAuthenticated()) {
+                String username = authentication.getName();
+                return userRepository.findByUsername(username)
+                        .map(u -> (u.getName() != null && !u.getName().isBlank()) ? u.getName() : u.getUsername())
+                        .orElse(username);
+            }
+        } catch (Exception ignored) {
+        }
+        return "Procurement Officer";
     }
 }

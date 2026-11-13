@@ -25,6 +25,15 @@ public interface ReorderQuotationRepository extends JpaRepository<ReorderQuotati
     long countByPharmacyIdAndStatus(Long pharmacyId, ReorderQuotation.Status status);
 
     @Query("SELECT q FROM ReorderQuotation q " +
+           "LEFT JOIN FETCH q.pharmacy p " +
+           "LEFT JOIN FETCH p.facility " +
+           "LEFT JOIN FETCH q.user " +
+           "LEFT JOIN FETCH q.items i " +
+           "LEFT JOIN FETCH i.sku " +
+           "WHERE q.id = :id")
+    Optional<ReorderQuotation> findByIdWithDetails(@Param("id") Long id);
+
+    @Query("SELECT q FROM ReorderQuotation q " +
            "LEFT JOIN q.supplier s " +
            "LEFT JOIN q.user u " +
            "WHERE q.pharmacy.id = :pharmacyId " +

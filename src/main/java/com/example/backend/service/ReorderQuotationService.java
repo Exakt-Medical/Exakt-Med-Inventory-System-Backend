@@ -2,6 +2,7 @@ package com.example.backend.service;
 
 import com.example.backend.dto.common.PageResponseDto;
 import com.example.backend.dto.order.OrderItemRequestDto;
+import com.example.backend.dto.order.OrderResponseDto;
 import com.example.backend.dto.reorderQuotation.*;
 import com.example.backend.entity.*;
 import com.example.backend.repository.*;
@@ -35,6 +36,7 @@ public class ReorderQuotationService {
     private final OrderedItemRepository orderedItemRepository;
     private final AuditLogService auditLogService;
     private final FacilityAccessGuard facilityAccessGuard;
+    private final EmailNotificationService emailNotificationService;
 
     public ReorderQuotationService(ReorderQuotationRepository quotationRepository,
                                    ReorderQuotationItemRepository quotationItemRepository,
@@ -45,7 +47,8 @@ public class ReorderQuotationService {
                                    OrderRepository orderRepository,
                                    OrderedItemRepository orderedItemRepository,
                                    AuditLogService auditLogService,
-                                   FacilityAccessGuard facilityAccessGuard) {
+                                   FacilityAccessGuard facilityAccessGuard,
+                                   EmailNotificationService emailNotificationService) {
         this.quotationRepository = quotationRepository;
         this.quotationItemRepository = quotationItemRepository;
         this.pharmacyRepository = pharmacyRepository;
@@ -56,6 +59,7 @@ public class ReorderQuotationService {
         this.orderedItemRepository = orderedItemRepository;
         this.auditLogService = auditLogService;
         this.facilityAccessGuard = facilityAccessGuard;
+        this.emailNotificationService = emailNotificationService;
     }
 
     // 1. CREATE REORDER QUOTATION (Pharmacist / Admin / Procurement)
@@ -141,6 +145,11 @@ public class ReorderQuotationService {
 
         ReorderQuotationResponseDto response = mapToResponseDto(savedQuotation);
         response.setMessage("Reorder quotation created successfully.");
+
+        // Asynchronously notify assigned procurement officers via email with the detached response DTO
+        String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : "";
+        emailNotificationService.notifyProcurementOfNewQuotation(response, facilityName);
+
         return response;
     }
 
@@ -436,6 +445,14 @@ public class ReorderQuotationService {
 
         ReorderQuotationResponseDto response = mapToResponseDto(quotation);
         response.setMessage("Quotation successfully approved and converted into Purchase Order " + poNumber + ".");
+
+        // Asynchronously notify assigned Admin users via email
+        String facilityName = quotation.getPharmacy() != null && quotation.getPharmacy().getFacility() != null
+                ? quotation.getPharmacy().getFacility().getName() : "";
+        String creatorName = resolveCurrentUserName();
+        OrderResponseDto orderDto = mapToOrderResponseDto(savedOrder, orderedItemsToSave);
+        emailNotificationService.notifyAdminOfNewPurchaseOrder(orderDto, facilityName, creatorName);
+
         return response;
     }
 
@@ -614,6 +631,16 @@ public class ReorderQuotationService {
                 .build();
     }
 
+    private String resolveCurrentUserName() {
+        User currentUser = getCurrentUser();
+        if (currentUser != null) {
+            return (currentUser.getName() != null && !currentUser.getName().isBlank())
+                    ? currentUser.getName()
+                    : currentUser.getUsername();
+        }
+        return "Procurement Officer";
+    }
+
     private User getCurrentUser() {
         try {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -624,6 +651,48 @@ public class ReorderQuotationService {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private OrderResponseDto mapToOrderResponseDto(Order order, List<OrderedItem> items) {
+        List<com.example.backend.dto.order.OrderItemResponseDto> itemDtos = new ArrayList<>();
+        if (items != null) {
+            for (OrderedItem oi : items) {
+                com.example.backend.dto.order.OrderItemResponseDto itemDto = new com.example.backend.dto.order.OrderItemResponseDto();
+                itemDto.setId(oi.getId());
+                if (oi.getSku() != null) {
+                    itemDto.setSkuId(oi.getSku().getId());
+                    itemDto.setSkuName(oi.getSku().getName());
+                    itemDto.setBrandName(oi.getSku().getBrandName());
+                    itemDto.setPackagingUnit(oi.getSku().getPackagingUnit());
+                    if (oi.getSku().getLibMedicine() != null) {
+                        itemDto.setGenericName(oi.getSku().getLibMedicine().getDrugDescription());
+                    }
+                }
+                itemDto.setOrderedUnits(oi.getOrderedUnits());
+                itemDto.setPrice(oi.getPrice());
+                itemDto.setPricePerUnit(oi.getPricePerUnit());
+                itemDtos.add(itemDto);
+            }
+        }
+
+        OrderResponseDto dto = new OrderResponseDto();
+        dto.setId(order.getId());
+        dto.setPurchaseOrderNum(order.getPurchaseOrderNum());
+        if (order.getPharmacy() != null) {
+            dto.setPharmacyId(order.getPharmacy().getId());
+            dto.setPharmacyName(order.getPharmacy().getPharmacyName());
+        }
+        if (order.getSupplier() != null) {
+            dto.setSupplierId(order.getSupplier().getId());
+            dto.setSupplierName(order.getSupplier().getName());
+        }
+        dto.setPriority(order.getPriority());
+        dto.setTotalOrderedUnits(order.getTotalOrderedUnits());
+        dto.setTotalPrice(order.getTotalPrice());
+        dto.setNotes(order.getNotes());
+        dto.setStatus(order.getStatus());
+        dto.setItems(itemDtos);
+        return dto;
     }
 }
 

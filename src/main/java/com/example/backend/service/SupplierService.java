@@ -99,12 +99,12 @@ public class SupplierService {
     }
 
     // 2. GET ALL SUPPLIERS - optionally filtered by facilityId / pharmacyId
-    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement')")
+    @PreAuthorize("isAuthenticated()")
     public List<SupplierResponseDto> getAllSuppliers(Long facilityId) {
         return getAllSuppliers(facilityId, null);
     }
 
-    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement')")
+    @PreAuthorize("isAuthenticated()")
     public List<SupplierResponseDto> getAllSuppliers(Long facilityId, Long pharmacyId) {
         List<Supplier> suppliers;
         if (pharmacyId != null) {
