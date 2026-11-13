@@ -453,6 +453,9 @@ public class ReorderQuotationService {
         OrderResponseDto orderDto = mapToOrderResponseDto(savedOrder, orderedItemsToSave);
         emailNotificationService.notifyAdminOfNewPurchaseOrder(orderDto, facilityName, creatorName);
 
+        // Asynchronously notify Pharmacists that the quotation was approved & converted to PO
+        emailNotificationService.notifyPharmacistOfQuotationStatusUpdate(response, facilityName, creatorName);
+
         return response;
     }
 
@@ -487,6 +490,13 @@ public class ReorderQuotationService {
 
         ReorderQuotationResponseDto response = mapToResponseDto(saved);
         response.setMessage("Reorder quotation has been rejected.");
+
+        // Asynchronously notify Pharmacists that the quotation was denied/rejected
+        String facilityName = (saved.getPharmacy() != null && saved.getPharmacy().getFacility() != null)
+                ? saved.getPharmacy().getFacility().getName() : "";
+        String reviewerName = resolveCurrentUserName();
+        emailNotificationService.notifyPharmacistOfQuotationStatusUpdate(response, facilityName, reviewerName);
+
         return response;
     }
 

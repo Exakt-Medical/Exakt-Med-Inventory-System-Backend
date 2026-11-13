@@ -34,6 +34,17 @@ public interface UserPharmacyLinkRepository extends JpaRepository<UserPharmacyLi
            "AND u.email IS NOT NULL AND TRIM(u.email) <> ''")
     List<String> findProcurementEmailsByPharmacyId(@org.springframework.data.repository.query.Param("pharmacyId") Long pharmacyId);
 
+    default List<String> findProcurementByPharmacyId(Long pharmacyId) {
+        return findProcurementEmailsByPharmacyId(pharmacyId);
+    }
+
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT u.email FROM UserPharmacyLink link " +
+           "JOIN link.user u " +
+           "WHERE link.pharmacy.id = :pharmacyId " +
+           "AND u.role = com.example.backend.entity.User.Role.Pharmacist " +
+           "AND u.email IS NOT NULL AND TRIM(u.email) <> ''")
+    List<String> findPharmacistEmailsByPharmacyId(@org.springframework.data.repository.query.Param("pharmacyId") Long pharmacyId);
+
     void deleteByUserId(Long userId);
 }
 

@@ -415,6 +415,20 @@ public class OrderService {
 
         OrderResponseDto response = mapToOrderResponseDto(updatedOrder, itemDtos);
         response.setMessage("Order status updated successfully.");
+
+        // If Approved or Denied, asynchronously notify assigned Procurement officers via email
+        if (newStatus == Order.Status.Approved || newStatus == Order.Status.Denied) {
+            try {
+                String facilityName = (updatedOrder.getPharmacy() != null && updatedOrder.getPharmacy().getFacility() != null)
+                        ? updatedOrder.getPharmacy().getFacility().getName() : "";
+                String reviewerName = resolveCurrentUserName("Administrator");
+                emailNotificationService.notifyProcurementOfOrderStatusUpdate(
+                        response, newStatus, notes, facilityName, reviewerName);
+            } catch (Exception ex) {
+                // Non-blocking fallback
+            }
+        }
+
         return response;
     }
 
@@ -472,6 +486,10 @@ public class OrderService {
     }
 
     private String resolveCurrentUserName() {
+        return resolveCurrentUserName("Procurement Officer");
+    }
+
+    private String resolveCurrentUserName(String defaultRole) {
         try {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             if (authentication != null && authentication.isAuthenticated()) {
@@ -482,6 +500,6 @@ public class OrderService {
             }
         } catch (Exception ignored) {
         }
-        return "Procurement Officer";
+        return defaultRole != null ? defaultRole : "System User";
     }
 }
