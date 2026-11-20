@@ -162,4 +162,13 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
     List<Sku> findAvailableSkusByDrugCodesAndPharmacyId(
             @Param("drugCodes") java.util.Collection<String> drugCodes,
             @Param("pharmacyId") Long pharmacyId);
+
+    // 6. Query active SKUs for OneRx RabbitMQ stock snapshot seeding (all pharmacies or a single pharmacy)
+    @Query("SELECT s FROM Sku s " +
+           "JOIN FETCH s.libMedicine m " +
+           "JOIN FETCH s.pharmacy p " +
+           "WHERE (s.status IS NULL OR s.status = com.example.backend.entity.Sku.Status.Active) " +
+           "  AND (:pharmacyId IS NULL OR p.id = :pharmacyId) " +
+           "ORDER BY p.id ASC, m.drugCode ASC, s.brandName ASC")
+    List<Sku> findActiveSkusForSnapshot(@Param("pharmacyId") Long pharmacyId);
 }

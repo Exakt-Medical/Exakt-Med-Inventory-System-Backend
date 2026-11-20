@@ -84,6 +84,19 @@ public class OneRxDispenseService {
      */
     @Transactional
     public OneRxDispenseResponseDto dispenseMedications(OneRxDispenseRequestDto request) {
+        return executeDispense(request, true);
+    }
+
+    /**
+     * Executes atomic dispensing triggered by an authenticated RabbitMQ message
+     * (no HTTP SecurityContext is present on listener threads).
+     */
+    @Transactional
+    public OneRxDispenseResponseDto dispenseMedicationsFromMessaging(OneRxDispenseRequestDto request) {
+        return executeDispense(request, false);
+    }
+
+    private OneRxDispenseResponseDto executeDispense(OneRxDispenseRequestDto request, boolean enforceUserAccess) {
         if (request == null) {
             throw new IllegalArgumentException("Request body cannot be null.");
         }
@@ -104,8 +117,10 @@ public class OneRxDispenseService {
 
         Facility facility = pharmacy.getFacility();
 
-        // Enforce pharmacy access if called by a regular user token
-        facilityAccessGuard.verifyPharmacyAccess(pharmacy.getId());
+        // Enforce pharmacy access when invoked via HTTP API
+        if (enforceUserAccess) {
+            facilityAccessGuard.verifyPharmacyAccess(pharmacy.getId());
+        }
 
         // Idempotency guard: Prevent duplicate dispense for the same rx_number in this pharmacy
         if (inventoryTransactionRepository.existsByPharmacyIdAndTransactionTypeAndReferenceNumberIgnoreCase(

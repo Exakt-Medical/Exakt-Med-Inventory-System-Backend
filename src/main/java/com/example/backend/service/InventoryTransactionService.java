@@ -6,10 +6,12 @@ import com.example.backend.dto.inventory.InventoryLedgerResponseDto;
 import com.example.backend.dto.inventory.InventoryTransactionResponseDto;
 import com.example.backend.dto.inventory.InventoryTransactionSummaryDto;
 import com.example.backend.entity.*;
+import com.example.backend.onerx.messaging.event.StockChangedEvent;
 import com.example.backend.repository.InventoryTransactionRepository;
 import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.security.FacilityAccessGuard;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,15 +32,18 @@ public class InventoryTransactionService {
     private final SkuRepository skuRepository;
     private final PharmacyRepository pharmacyRepository;
     private final FacilityAccessGuard facilityAccessGuard;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public InventoryTransactionService(InventoryTransactionRepository inventoryTransactionRepository,
                                        SkuRepository skuRepository,
                                        PharmacyRepository pharmacyRepository,
-                                       FacilityAccessGuard facilityAccessGuard) {
+                                       FacilityAccessGuard facilityAccessGuard,
+                                       ApplicationEventPublisher applicationEventPublisher) {
         this.inventoryTransactionRepository = inventoryTransactionRepository;
         this.skuRepository = skuRepository;
         this.pharmacyRepository = pharmacyRepository;
         this.facilityAccessGuard = facilityAccessGuard;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     /**
@@ -118,7 +123,11 @@ public class InventoryTransactionService {
                 .createdAt(createdAt != null ? createdAt : LocalDateTime.now())
                 .build();
 
-        return inventoryTransactionRepository.save(tx);
+        InventoryTransaction saved = inventoryTransactionRepository.save(tx);
+        if (sku.getId() != null) {
+            applicationEventPublisher.publishEvent(new StockChangedEvent(sku.getId()));
+        }
+        return saved;
     }
 
     // Legacy overloads accepting Facility parameter for backward compatibility

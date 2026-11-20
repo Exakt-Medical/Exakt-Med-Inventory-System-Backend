@@ -18,6 +18,7 @@ import com.example.backend.entity.OrderedItem;
 import com.example.backend.entity.Pharmacy;
 import com.example.backend.entity.Sku;
 import com.example.backend.entity.User;
+import com.example.backend.onerx.messaging.event.StockChangedEvent;
 import com.example.backend.repository.DispensedLogRepository;
 import com.example.backend.repository.LibMedicineRepository;
 import com.example.backend.repository.LibPackagingUnitRepository;
@@ -26,6 +27,7 @@ import com.example.backend.repository.PharmacyRepository;
 import com.example.backend.repository.SkuRepository;
 import com.example.backend.repository.UserRepository;
 import com.example.backend.security.FacilityAccessGuard;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -58,6 +60,7 @@ public class SkuService {
     private final LibPackagingUnitRepository libPackagingUnitRepository;
     private final DispensedLogRepository dispensedLogRepository;
     private final FacilityAccessGuard facilityAccessGuard;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public SkuService(SkuRepository skuRepository,
                       PharmacyRepository pharmacyRepository,
@@ -69,7 +72,8 @@ public class SkuService {
                       OrderedItemRepository orderedItemRepository,
                       LibPackagingUnitRepository libPackagingUnitRepository,
                       DispensedLogRepository dispensedLogRepository,
-                      FacilityAccessGuard facilityAccessGuard) {
+                      FacilityAccessGuard facilityAccessGuard,
+                      ApplicationEventPublisher applicationEventPublisher) {
         this.skuRepository = skuRepository;
         this.pharmacyRepository = pharmacyRepository;
         this.libMedicineRepository = libMedicineRepository;
@@ -81,6 +85,7 @@ public class SkuService {
         this.libPackagingUnitRepository = libPackagingUnitRepository;
         this.dispensedLogRepository = dispensedLogRepository;
         this.facilityAccessGuard = facilityAccessGuard;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     // --- AUTOMATED ATTRIBUTE EXTRACTION & SKU GENERATION ---
@@ -455,6 +460,7 @@ public class SkuService {
         sku.setStatus(request.getStatus() != null ? request.getStatus() : Sku.Status.Active);
 
         Sku savedSku = skuRepository.save(sku);
+        applicationEventPublisher.publishEvent(new StockChangedEvent(savedSku.getId()));
 
         auditLogService.logAction(
                 pharmacy,
@@ -683,6 +689,7 @@ public class SkuService {
         }
 
         Sku updatedSku = skuRepository.save(existingSku);
+        applicationEventPublisher.publishEvent(new StockChangedEvent(updatedSku.getId()));
 
         auditLogService.logAction(
                 updatedSku.getPharmacy(),
@@ -713,6 +720,7 @@ public class SkuService {
 
         sku.setStatus(Sku.Status.Inactive);
         skuRepository.save(sku);
+        applicationEventPublisher.publishEvent(new StockChangedEvent(sku.getId()));
 
         auditLogService.logAction(
                 sku.getPharmacy(),
@@ -741,6 +749,7 @@ public class SkuService {
 
         sku.setStatus(Sku.Status.Active);
         Sku saved = skuRepository.save(sku);
+        applicationEventPublisher.publishEvent(new StockChangedEvent(saved.getId()));
 
         auditLogService.logAction(
                 sku.getPharmacy(),
@@ -807,6 +816,7 @@ public class SkuService {
 
         sku.setUnits(newUnits);
         Sku savedSku = skuRepository.save(sku);
+        applicationEventPublisher.publishEvent(new StockChangedEvent(savedSku.getId()));
 
         boolean isDispensed = request.getReason() != null && "DISPENSED".equalsIgnoreCase(request.getReason().trim());
 
