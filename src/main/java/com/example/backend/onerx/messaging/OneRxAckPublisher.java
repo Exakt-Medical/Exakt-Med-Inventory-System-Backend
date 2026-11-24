@@ -47,6 +47,7 @@ public class OneRxAckPublisher {
                     .pharmacyCode(pharmacyCode)
                     .totalUnitsDeducted(totalUnitsDeducted)
                     .status(status)
+                    .message(errorMessage)
                     .errorMessage(errorMessage)
                     .timestamp(Instant.now().toString())
                     .build();

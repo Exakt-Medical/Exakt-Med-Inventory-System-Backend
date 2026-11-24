@@ -108,12 +108,13 @@ public class OneRxDispenseConsumer {
                 return;
             }
 
-            log.error("OneRx dispense validation/stock error for eventId={}, RX={}: {}. Routing to DLQ.",
+            log.error("OneRx dispense validation/stock error for eventId={}, RX={}: {}. Acknowledged with FAILED status.",
                     eventId, rxNumber, errMsg);
             recordNonProcessedInboxSafely(eventId, rxNumber, pharmacyCode,
                     InventoryDispenseInbox.Status.FAILED, rawPayload, errMsg);
             ackPublisher.sendAck(eventId, rxNumber, pharmacyCode, 0, "FAILED", errMsg);
-            throw new AmqpRejectAndDontRequeueException(errMsg, ex);
+            // Return cleanly: RabbitMQ ACKs the message off the queue; OneRx has already received the FAILED ACK.
+            return;
         } catch (Exception ex) {
             String errMsg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
             log.error("Unexpected error processing OneRx dispense eventId={}, RX={}. Routing to DLQ.",
@@ -157,7 +158,7 @@ public class OneRxDispenseConsumer {
         entry.setStatus(status);
         entry.setTotalUnitsDeducted(totalUnitsDeducted);
         entry.setRawPayload(rawPayload);
-        entry.setErrorMessage(errorMessage);
+        entry.setErrorMessage(truncate(errorMessage, 255));
         entry.setProcessedAt(now);
         entry.setCreatedAt(now);
         inboxRepository.save(entry);

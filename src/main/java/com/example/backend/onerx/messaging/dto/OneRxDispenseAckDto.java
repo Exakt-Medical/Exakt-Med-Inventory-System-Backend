@@ -19,6 +19,7 @@ public class OneRxDispenseAckDto {
     private String pharmacyCode;
     private Integer totalUnitsDeducted;
     private String status;
+    private String message;
     private String errorMessage;
     private String timestamp;
 }
