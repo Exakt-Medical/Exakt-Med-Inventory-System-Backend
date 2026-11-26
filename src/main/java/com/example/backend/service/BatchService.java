@@ -56,6 +56,7 @@ public class BatchService {
     private final UserRepository userRepository;
     private final LibLocationRepository libLocationRepository;
     private final FacilityAccessGuard facilityAccessGuard;
+    private final GenericStockSettingService genericStockSettingService;
 
     public BatchService(BatchRepository batchRepository,
                         OrderedItemRepository orderedItemRepository,
@@ -66,7 +67,8 @@ public class BatchService {
                         InventoryTransactionService inventoryTransactionService,
                         UserRepository userRepository,
                         LibLocationRepository libLocationRepository,
-                        FacilityAccessGuard facilityAccessGuard) {
+                        FacilityAccessGuard facilityAccessGuard,
+                        GenericStockSettingService genericStockSettingService) {
         this.batchRepository = batchRepository;
         this.orderedItemRepository = orderedItemRepository;
         this.skuRepository = skuRepository;
@@ -77,6 +79,7 @@ public class BatchService {
         this.userRepository = userRepository;
         this.libLocationRepository = libLocationRepository;
         this.facilityAccessGuard = facilityAccessGuard;
+        this.genericStockSettingService = genericStockSettingService;
     }
 
     // 1. RECEIVE SINGLE BATCH (Pharmacist / Admin / SuperAdmin)
@@ -228,6 +231,9 @@ public class BatchService {
                 long currentUnits = sku.getUnits() != null ? sku.getUnits() : 0L;
                 sku.setUnits(currentUnits + unitsToAdd);
                 skuRepository.save(sku);
+                if (sku.getGenericStockSetting() != null) {
+                    genericStockSettingService.recalculateTotalUnits(sku.getGenericStockSetting().getId());
+                }
 
                 String ref = "BATCH-" + savedBatch.getBatchNum();
                 String poSupplier = "";
@@ -633,6 +639,9 @@ public class BatchService {
         if (sku != null) {
             sku.setUnits(finalSkuUnits);
             skuRepository.save(sku);
+            if (sku.getGenericStockSetting() != null) {
+                genericStockSettingService.recalculateTotalUnits(sku.getGenericStockSetting().getId());
+            }
         }
 
         User currentUser = getCurrentUser();
@@ -798,6 +807,9 @@ public class BatchService {
                 if (s != null) {
                     s.setUnits(newUnits);
                     skuRepository.save(s);
+                    if (s.getGenericStockSetting() != null) {
+                        genericStockSettingService.recalculateTotalUnits(s.getGenericStockSetting().getId());
+                    }
                 }
                 batch.setSkuDeducted(true);
 
@@ -1002,6 +1014,9 @@ public class BatchService {
             long newUnits = Math.max(0L, currentUnits + delta);
             sku.setUnits(newUnits);
             skuRepository.save(sku);
+            if (sku.getGenericStockSetting() != null) {
+                genericStockSettingService.recalculateTotalUnits(sku.getGenericStockSetting().getId());
+            }
 
             inventoryTransactionService.recordTransaction(
                     sku,

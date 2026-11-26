@@ -18,6 +18,7 @@ import com.example.backend.repository.UserRepository;
 import com.example.backend.security.FacilityAccessGuard;
 import com.example.backend.service.AuditLogService;
 import com.example.backend.service.BatchService;
+import com.example.backend.service.GenericStockSettingService;
 import com.example.backend.service.InventoryTransactionService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -51,6 +52,7 @@ public class OneRxDispenseService {
     private final AuditLogService auditLogService;
     private final UserRepository userRepository;
     private final FacilityAccessGuard facilityAccessGuard;
+    private final GenericStockSettingService genericStockSettingService;
 
     public OneRxDispenseService(SkuRepository skuRepository,
                                 BatchRepository batchRepository,
@@ -61,7 +63,8 @@ public class OneRxDispenseService {
                                 DispensedLogRepository dispensedLogRepository,
                                 AuditLogService auditLogService,
                                 UserRepository userRepository,
-                                FacilityAccessGuard facilityAccessGuard) {
+                                FacilityAccessGuard facilityAccessGuard,
+                                GenericStockSettingService genericStockSettingService) {
         this.skuRepository = skuRepository;
         this.batchRepository = batchRepository;
         this.pharmacyRepository = pharmacyRepository;
@@ -72,6 +75,7 @@ public class OneRxDispenseService {
         this.auditLogService = auditLogService;
         this.userRepository = userRepository;
         this.facilityAccessGuard = facilityAccessGuard;
+        this.genericStockSettingService = genericStockSettingService;
     }
 
     /**
@@ -351,10 +355,13 @@ public class OneRxDispenseService {
                 currentRunningBalance = balanceAfter;
             }
 
-            // 2. Decrement SKU on-hand inventory
+            // 2. Decrement SKU on-hand inventory & sync generic pooled total_units
             long finalSkuUnits = Math.max(0L, (sku.getUnits() != null ? sku.getUnits() : 0L) - unitsToDispense);
             sku.setUnits(finalSkuUnits);
             Sku savedSku = skuRepository.save(sku);
+            if (savedSku.getGenericStockSetting() != null) {
+                genericStockSettingService.recalculateTotalUnits(savedSku.getGenericStockSetting().getId());
+            }
 
             // 3. Create DispensedLog with Status.Received
             DispensedLog dispensedLog = new DispensedLog();

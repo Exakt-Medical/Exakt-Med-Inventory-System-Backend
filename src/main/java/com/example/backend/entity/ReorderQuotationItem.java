@@ -7,6 +7,7 @@ import lombok.Setter;
 @Entity
 @Table(name = "reorder_quotation_items", indexes = {
     @Index(name = "idx_quotation_items_quotation", columnList = "quotationId"),
+    @Index(name = "idx_quotation_items_gss", columnList = "generic_stock_settings_id"),
     @Index(name = "idx_quotation_items_sku", columnList = "skuId")
 })
 @Getter
@@ -22,7 +23,12 @@ public class ReorderQuotationItem {
     private ReorderQuotation quotation;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "skuId", nullable = false)
+    @JoinColumn(name = "generic_stock_settings_id", nullable = false)
+    private GenericStockSetting genericStockSetting;
+
+    // Optional: null when Pharmacist creates a generic quotation; populated when Procurement converts to PO
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "skuId", nullable = true)
     private Sku sku;
 
     @Column(nullable = false)
@@ -45,4 +51,3 @@ public class ReorderQuotationItem {
         }
     }
 }
-

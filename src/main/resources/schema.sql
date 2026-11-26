@@ -135,35 +135,53 @@ CREATE INDEX IF NOT EXISTS idx_lib_loc_code ON lib_locations (code);
 -- 4. INVENTORY & SKU CATALOG
 -- -----------------------------------------------------------------------------
 
--- Entity: Sku (Scoped to Pharmacy)
-CREATE TABLE IF NOT EXISTS sku (
+-- Entity: GenericStockSetting (Pharmacy-scoped generic medicine metadata, pooled total_units & shared thresholds)
+CREATE TABLE IF NOT EXISTS generic_stock_settings (
     id BIGSERIAL PRIMARY KEY,
     pharmacy_id BIGINT NOT NULL,
-    medicine_id BIGINT,
-    name VARCHAR(255) NOT NULL,
-    brand_name VARCHAR(255) NOT NULL,
+    medicine_id BIGINT NOT NULL,
     dosage_form VARCHAR(255) NOT NULL,
     dosage_strength VARCHAR(255),
     packaging_unit VARCHAR(255) NOT NULL,
-    units BIGINT NOT NULL DEFAULT 0,
     minimum_level BIGINT NOT NULL,
     reorder_level BIGINT NOT NULL,
     maximum_level BIGINT NOT NULL,
+    total_units BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(6),
+    updated_at TIMESTAMP(6),
+    CONSTRAINT uk_generic_stock_setting UNIQUE (pharmacy_id, medicine_id, packaging_unit),
+    CONSTRAINT chk_generic_stock_thresholds CHECK (
+        minimum_level >= 0
+        AND reorder_level > minimum_level
+        AND maximum_level > reorder_level
+    ),
+    CONSTRAINT fk_gss_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacies(id),
+    CONSTRAINT fk_gss_medicine FOREIGN KEY (medicine_id) REFERENCES lib_medicine(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gss_pharmacy ON generic_stock_settings (pharmacy_id);
+CREATE INDEX IF NOT EXISTS idx_gss_pharmacy_medicine ON generic_stock_settings (pharmacy_id, medicine_id);
+CREATE INDEX IF NOT EXISTS idx_gss_pharmacy_total_units ON generic_stock_settings (pharmacy_id, total_units);
+
+-- Entity: Sku (Brand-level SKU referencing GenericStockSetting)
+CREATE TABLE IF NOT EXISTS sku (
+    id BIGSERIAL PRIMARY KEY,
+    generic_stock_settings_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    brand_name VARCHAR(255) NOT NULL,
+    units BIGINT NOT NULL DEFAULT 0,
     status VARCHAR(50) NOT NULL DEFAULT 'Active',
     created_at TIMESTAMP(6),
     updated_at TIMESTAMP(6),
-    CONSTRAINT uk_pharmacy_sku_name UNIQUE (pharmacy_id, name),
-    CONSTRAINT fk_sku_pharmacy FOREIGN KEY (pharmacy_id) REFERENCES pharmacies(id),
-    CONSTRAINT fk_sku_medicine FOREIGN KEY (medicine_id) REFERENCES lib_medicine(id)
+    CONSTRAINT uk_gss_sku_name UNIQUE (generic_stock_settings_id, name),
+    CONSTRAINT fk_sku_generic_stock_settings FOREIGN KEY (generic_stock_settings_id) REFERENCES generic_stock_settings(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_brand ON sku (pharmacy_id, brand_name);
-CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_units ON sku (pharmacy_id, units);
-CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_name ON sku (pharmacy_id, name);
-CREATE INDEX IF NOT EXISTS idx_sku_pharmacy_status ON sku (pharmacy_id, status);
-
--- Safe migration for existing schemas
-ALTER TABLE sku ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'Active';
+CREATE INDEX IF NOT EXISTS idx_sku_generic_stock_settings ON sku (generic_stock_settings_id);
+CREATE INDEX IF NOT EXISTS idx_sku_brand_name ON sku (brand_name);
+CREATE INDEX IF NOT EXISTS idx_sku_name ON sku (name);
+CREATE INDEX IF NOT EXISTS idx_sku_status ON sku (status);
+CREATE INDEX IF NOT EXISTS idx_sku_units ON sku (units);
 
 -- -----------------------------------------------------------------------------
 -- 5. PURCHASING, REPLENISHMENT & BATCH RECEIVING
@@ -223,12 +241,12 @@ CREATE TABLE IF NOT EXISTS ordered_items (
     CONSTRAINT fk_ordered_items_sku FOREIGN KEY (sku_id) REFERENCES sku(id)
 );
 
--- Entity: ReorderQuotation (Scoped to Pharmacy)
+-- Entity: ReorderQuotation (Scoped to Pharmacy; supplier is optional until Procurement assigns it)
 CREATE TABLE IF NOT EXISTS reorder_quotations (
     id BIGSERIAL PRIMARY KEY,
     quotation_number VARCHAR(255) NOT NULL UNIQUE,
     pharmacy_id BIGINT NOT NULL,
-    supplier_id BIGINT NOT NULL,
+    supplier_id BIGINT,
     user_id BIGINT,
     order_id BIGINT,
     priority VARCHAR(50) NOT NULL DEFAULT 'Normal',
@@ -250,19 +268,22 @@ CREATE INDEX IF NOT EXISTS idx_quotations_pharmacy_created ON reorder_quotations
 CREATE INDEX IF NOT EXISTS idx_quotations_pharmacy_status ON reorder_quotations (pharmacy_id, status);
 CREATE INDEX IF NOT EXISTS idx_quotations_num ON reorder_quotations (quotation_number);
 
--- Entity: ReorderQuotationItem
+-- Entity: ReorderQuotationItem (Generic-based; sku_id optional until Procurement chooses/creates a brand SKU)
 CREATE TABLE IF NOT EXISTS reorder_quotation_items (
     id BIGSERIAL PRIMARY KEY,
     quotation_id BIGINT NOT NULL,
-    sku_id BIGINT NOT NULL,
+    generic_stock_settings_id BIGINT NOT NULL,
+    sku_id BIGINT,
     requested_units BIGINT NOT NULL,
     estimated_price BIGINT NOT NULL DEFAULT 0,
     notes VARCHAR(500),
     CONSTRAINT fk_quotation_items_quotation FOREIGN KEY (quotation_id) REFERENCES reorder_quotations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quotation_items_gss FOREIGN KEY (generic_stock_settings_id) REFERENCES generic_stock_settings(id),
     CONSTRAINT fk_quotation_items_sku FOREIGN KEY (sku_id) REFERENCES sku(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON reorder_quotation_items (quotation_id);
+CREATE INDEX IF NOT EXISTS idx_quotation_items_gss ON reorder_quotation_items (generic_stock_settings_id);
 CREATE INDEX IF NOT EXISTS idx_quotation_items_sku ON reorder_quotation_items (sku_id);
 
 -- Entity: Batch (Scoped to Pharmacy)
@@ -274,7 +295,7 @@ CREATE TABLE IF NOT EXISTS batches (
     batch_num VARCHAR(255) NOT NULL,
     units BIGINT NOT NULL DEFAULT 0,
     manufacture_date DATE,
-    expiry_date DATE NOT NULL,
+    expiry_date DATE,
     status VARCHAR(255) NOT NULL DEFAULT 'Available'
         CHECK (status IN ('Quarantined', 'Available', 'Expired')),
     notes VARCHAR(255),

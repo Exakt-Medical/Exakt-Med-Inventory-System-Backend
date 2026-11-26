@@ -14,6 +14,9 @@ import lombok.Setter;
 @AllArgsConstructor
 public class OrderItemRequestDto {
 
+    // Optional: links back to ReorderQuotationItem when converting a generic quotation to a PO
+    private Long quotationItemId;
+
     @NotNull(message = "SKU ID is required")
     private Long skuId;
 

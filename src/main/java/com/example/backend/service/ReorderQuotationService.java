@@ -30,6 +30,7 @@ public class ReorderQuotationService {
     private final ReorderQuotationItemRepository quotationItemRepository;
     private final PharmacyRepository pharmacyRepository;
     private final SupplierRepository supplierRepository;
+    private final GenericStockSettingRepository genericStockSettingRepository;
     private final SkuRepository skuRepository;
     private final UserRepository userRepository;
     private final OrderRepository orderRepository;
@@ -42,6 +43,7 @@ public class ReorderQuotationService {
                                    ReorderQuotationItemRepository quotationItemRepository,
                                    PharmacyRepository pharmacyRepository,
                                    SupplierRepository supplierRepository,
+                                   GenericStockSettingRepository genericStockSettingRepository,
                                    SkuRepository skuRepository,
                                    UserRepository userRepository,
                                    OrderRepository orderRepository,
@@ -53,6 +55,7 @@ public class ReorderQuotationService {
         this.quotationItemRepository = quotationItemRepository;
         this.pharmacyRepository = pharmacyRepository;
         this.supplierRepository = supplierRepository;
+        this.genericStockSettingRepository = genericStockSettingRepository;
         this.skuRepository = skuRepository;
         this.userRepository = userRepository;
         this.orderRepository = orderRepository;
@@ -74,8 +77,11 @@ public class ReorderQuotationService {
         Pharmacy pharmacy = pharmacyRepository.findById(request.getPharmacyId())
                 .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
 
-        Supplier supplier = supplierRepository.findById(request.getSupplierId())
-                .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + request.getSupplierId()));
+        Supplier supplier = null;
+        if (request.getSupplierId() != null) {
+            supplier = supplierRepository.findById(request.getSupplierId())
+                    .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + request.getSupplierId()));
+        }
 
         if (request.getItems() == null || request.getItems().isEmpty()) {
             throw new RuntimeException("Quotation must contain at least one line item.");
@@ -109,14 +115,30 @@ public class ReorderQuotationService {
         long totalEstimatedCost = 0L;
 
         for (ReorderQuotationItemRequestDto itemDto : request.getItems()) {
-            Sku sku = skuRepository.findById(itemDto.getSkuId())
-                    .orElseThrow(() -> new RuntimeException("SKU not found with id: " + itemDto.getSkuId()));
+            Sku sku = null;
+            GenericStockSetting setting = null;
+
+            if (itemDto.getGenericStockSettingId() != null) {
+                setting = genericStockSettingRepository.findByIdWithMedicine(itemDto.getGenericStockSettingId())
+                        .orElseThrow(() -> new RuntimeException("Generic stock setting not found with id: " + itemDto.getGenericStockSettingId()));
+            }
+            if (itemDto.getSkuId() != null) {
+                sku = skuRepository.findByIdWithSetting(itemDto.getSkuId())
+                        .orElseThrow(() -> new RuntimeException("SKU not found with id: " + itemDto.getSkuId()));
+                if (setting == null) {
+                    setting = sku.getGenericStockSetting();
+                }
+            }
+            if (setting == null) {
+                throw new RuntimeException("Each quotation line item must specify a genericStockSettingId (or skuId).");
+            }
 
             long units = itemDto.getRequestedUnits() != null ? itemDto.getRequestedUnits() : 1L;
             long estPrice = itemDto.getEstimatedPrice() != null ? itemDto.getEstimatedPrice() : 0L;
 
             ReorderQuotationItem qi = new ReorderQuotationItem();
             qi.setQuotation(savedQuotation);
+            qi.setGenericStockSetting(setting);
             qi.setSku(sku);
             qi.setRequestedUnits(units);
             qi.setEstimatedPrice(estPrice);
@@ -131,6 +153,7 @@ public class ReorderQuotationService {
         savedQuotation.setEstimatedTotalCost(totalEstimatedCost);
         savedQuotation = quotationRepository.save(savedQuotation);
 
+        String supplierLabel = supplier != null ? " for supplier '" + supplier.getName() + "'" : " (supplier TBD by Procurement)";
         auditLogService.logAction(
                 pharmacy,
                 "Purchasing",
@@ -139,7 +162,7 @@ public class ReorderQuotationService {
                 AuditLog.Severity.INFO,
                 quotationNumber,
                 savedQuotation.getId(),
-                "Created reorder quotation " + quotationNumber + " with " + savedQuotation.getItems().size() + " items (" + totalUnits + " units) for supplier '" + supplier.getName() + "'.",
+                "Created generic reorder quotation " + quotationNumber + " with " + savedQuotation.getItems().size() + " generic item(s) (" + totalUnits + " units)" + supplierLabel + ".",
                 "Admin,Procurement,Pharmacist"
         );
 
@@ -220,6 +243,8 @@ public class ReorderQuotationService {
             Supplier supplier = supplierRepository.findById(request.getSupplierId())
                     .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + request.getSupplierId()));
             quotation.setSupplier(supplier);
+        } else {
+            quotation.setSupplier(null);
         }
 
         if (request.getPriority() != null && !request.getPriority().isBlank()) {
@@ -237,14 +262,29 @@ public class ReorderQuotationService {
             long totalCost = 0L;
 
             for (ReorderQuotationItemRequestDto itemDto : request.getItems()) {
-                Sku sku = skuRepository.findById(itemDto.getSkuId())
-                        .orElseThrow(() -> new RuntimeException("SKU not found with id: " + itemDto.getSkuId()));
+                Sku sku = null;
+                GenericStockSetting setting = null;
+                if (itemDto.getGenericStockSettingId() != null) {
+                    setting = genericStockSettingRepository.findByIdWithMedicine(itemDto.getGenericStockSettingId())
+                            .orElseThrow(() -> new RuntimeException("Generic stock setting not found with id: " + itemDto.getGenericStockSettingId()));
+                }
+                if (itemDto.getSkuId() != null) {
+                    sku = skuRepository.findByIdWithSetting(itemDto.getSkuId())
+                            .orElseThrow(() -> new RuntimeException("SKU not found with id: " + itemDto.getSkuId()));
+                    if (setting == null) {
+                        setting = sku.getGenericStockSetting();
+                    }
+                }
+                if (setting == null) {
+                    throw new RuntimeException("Each quotation line item must specify a genericStockSettingId (or skuId).");
+                }
 
                 long units = itemDto.getRequestedUnits() != null ? itemDto.getRequestedUnits() : 1L;
                 long estPrice = itemDto.getEstimatedPrice() != null ? itemDto.getEstimatedPrice() : 0L;
 
                 ReorderQuotationItem qi = new ReorderQuotationItem();
                 qi.setQuotation(quotation);
+                qi.setGenericStockSetting(setting);
                 qi.setSku(sku);
                 qi.setRequestedUnits(units);
                 qi.setEstimatedPrice(estPrice);
@@ -296,6 +336,10 @@ public class ReorderQuotationService {
             supplier = supplierRepository.findById(convertRequest.getSupplierId())
                     .orElseThrow(() -> new RuntimeException("Supplier not found with id: " + convertRequest.getSupplierId()));
         }
+        if (supplier == null) {
+            throw new RuntimeException("Supplier is required to convert a quotation into a Purchase Order.");
+        }
+        quotation.setSupplier(supplier);
 
         String priority = (convertRequest != null && convertRequest.getPriority() != null && !convertRequest.getPriority().isBlank())
                 ? convertRequest.getPriority()
@@ -305,7 +349,7 @@ public class ReorderQuotationService {
                 ? convertRequest.getNotes()
                 : quotation.getNotes();
 
-        // Determine items to order: if procurement passed an explicit list, use it (allows removing SKUs or setting final prices)
+        // Determine items to order: Procurement selects a concrete Brand SKU for each generic quotation line
         List<OrderedItem> orderedItemsToSave = new ArrayList<>();
         long totalOrderedUnits = 0L;
         long calculatedTotalPrice = 0L;
@@ -321,7 +365,6 @@ public class ReorderQuotationService {
         order.setNotes(notes);
         order.setTotalOrderedUnits(0L);
         order.setTotalPrice(0L);
-        // Generated PO has status PENDING as required
         order.setStatus(Order.Status.Pending);
 
         Order savedOrder = orderRepository.saveAndFlush(order);
@@ -332,10 +375,19 @@ public class ReorderQuotationService {
                 savedOrder.getId());
         savedOrder.setPurchaseOrderNum(poNumber);
 
+        java.util.Map<Long, ReorderQuotationItem> qiById = quotation.getItems().stream()
+                .filter(qi -> qi.getId() != null)
+                .collect(Collectors.toMap(ReorderQuotationItem::getId, qi -> qi, (a, b) -> a));
+        java.util.Map<Long, ReorderQuotationItem> qiBySettingId = quotation.getItems().stream()
+                .filter(qi -> qi.getGenericStockSetting() != null && qi.getGenericStockSetting().getId() != null)
+                .collect(Collectors.toMap(qi -> qi.getGenericStockSetting().getId(), qi -> qi, (a, b) -> a));
+
         if (convertRequest != null && convertRequest.getItems() != null && !convertRequest.getItems().isEmpty()) {
-            // Use custom items supplied by procurement
             for (OrderItemRequestDto itemDto : convertRequest.getItems()) {
-                Sku sku = skuRepository.findById(itemDto.getSkuId())
+                if (itemDto.getSkuId() == null) {
+                    throw new RuntimeException("Please select a Brand SKU for every line item before converting to a Purchase Order.");
+                }
+                Sku sku = skuRepository.findByIdWithSetting(itemDto.getSkuId())
                         .orElseThrow(() -> new RuntimeException("SKU not found with id: " + itemDto.getSkuId()));
 
                 long units = itemDto.getOrderedUnits() != null ? itemDto.getOrderedUnits() : 1L;
@@ -356,10 +408,25 @@ public class ReorderQuotationService {
                 orderedItemsToSave.add(oi);
                 totalOrderedUnits += units;
                 calculatedTotalPrice += price;
+
+                // Link chosen Brand SKU & negotiated pricing back onto the ReorderQuotationItem
+                ReorderQuotationItem matchedQi = itemDto.getQuotationItemId() != null
+                        ? qiById.get(itemDto.getQuotationItemId())
+                        : (sku.getGenericStockSetting() != null ? qiBySettingId.get(sku.getGenericStockSetting().getId()) : null);
+                if (matchedQi != null) {
+                    matchedQi.setSku(sku);
+                    matchedQi.setEstimatedPrice(price);
+                    matchedQi.setRequestedUnits(units);
+                }
             }
         } else {
-            // Default to quotation's existing items
+            // Fallback when converting without custom items (only valid if every line already has a brand SKU)
             for (ReorderQuotationItem qi : quotation.getItems()) {
+                if (qi.getSku() == null) {
+                    String gName = qi.getGenericStockSetting() != null && qi.getGenericStockSetting().getLibMedicine() != null
+                            ? qi.getGenericStockSetting().getLibMedicine().getDrugDescription() : "generic item";
+                    throw new RuntimeException("Brand SKU must be selected for '" + gName + "' before converting to a Purchase Order.");
+                }
                 OrderedItem oi = new OrderedItem();
                 oi.setOrder(savedOrder);
                 oi.setSku(qi.getSku());
@@ -394,24 +461,6 @@ public class ReorderQuotationService {
         savedOrder = orderRepository.save(savedOrder);
 
         orderedItemRepository.saveAll(orderedItemsToSave);
-
-        // Update quotation state and line item prices with procurement negotiated values
-        if (convertRequest != null && convertRequest.getItems() != null && !convertRequest.getItems().isEmpty()) {
-            java.util.Map<Long, com.example.backend.dto.order.OrderItemRequestDto> priceBySku = convertRequest.getItems().stream()
-                    .collect(java.util.stream.Collectors.toMap(com.example.backend.dto.order.OrderItemRequestDto::getSkuId, it -> it, (a, b) -> a));
-
-            for (ReorderQuotationItem qi : quotation.getItems()) {
-                if (qi.getSku() != null) {
-                    com.example.backend.dto.order.OrderItemRequestDto priceDto = priceBySku.get(qi.getSku().getId());
-                    if (priceDto != null) {
-                        qi.setEstimatedPrice(priceDto.getPrice() != null ? priceDto.getPrice() : 0L);
-                        if (priceDto.getOrderedUnits() != null) {
-                            qi.setRequestedUnits(priceDto.getOrderedUnits());
-                        }
-                    }
-                }
-            }
-        }
 
         quotation.setStatus(ReorderQuotation.Status.Approved);
         quotation.setOrder(savedOrder);
@@ -549,6 +598,10 @@ public class ReorderQuotationService {
         if (q.getItems() != null) {
             for (ReorderQuotationItem item : q.getItems()) {
                 Sku sku = item.getSku();
+                GenericStockSetting setting = item.getGenericStockSetting() != null
+                        ? item.getGenericStockSetting()
+                        : (sku != null ? sku.getGenericStockSetting() : null);
+
                 long units = item.getRequestedUnits() != null ? item.getRequestedUnits() : 0L;
                 long estPrice = item.getEstimatedPrice() != null ? item.getEstimatedPrice() : 0L;
 
@@ -562,16 +615,25 @@ public class ReorderQuotationService {
 
                 double perUnit = units > 0 ? Math.round(((double) estPrice / units) * 100.0) / 100.0 : 0.0;
 
+                String genericName = setting != null && setting.getLibMedicine() != null
+                        ? setting.getLibMedicine().getDrugDescription()
+                        : (sku != null && sku.getLibMedicine() != null ? sku.getLibMedicine().getDrugDescription() : "");
+                Long pooledStock = setting != null && setting.getTotalUnits() != null
+                        ? setting.getTotalUnits()
+                        : (sku != null && sku.getUnits() != null ? sku.getUnits() : 0L);
+
                 ReorderQuotationItemResponseDto itemDto = ReorderQuotationItemResponseDto.builder()
                         .id(item.getId())
+                        .genericStockSettingId(setting != null ? setting.getId() : null)
+                        .medicineId(setting != null && setting.getLibMedicine() != null ? setting.getLibMedicine().getId() : null)
                         .skuId(sku != null ? sku.getId() : null)
-                        .skuCode(sku != null ? sku.getName() : "")
-                        .brandName(sku != null ? sku.getBrandName() : "")
-                        .genericName(sku != null && sku.getLibMedicine() != null ? sku.getLibMedicine().getDrugDescription() : "")
-                        .dosageForm(sku != null ? sku.getDosageForm() : "")
-                        .dosageStrength(sku != null ? sku.getDosageStrength() : "")
-                        .packagingUnit(sku != null ? sku.getPackagingUnit() : "")
-                        .currentStock(sku != null && sku.getUnits() != null ? sku.getUnits() : 0L)
+                        .skuCode(sku != null ? sku.getName() : null)
+                        .brandName(sku != null ? sku.getBrandName() : null)
+                        .genericName(genericName)
+                        .dosageForm(setting != null ? setting.getDosageForm() : (sku != null ? sku.getDosageForm() : ""))
+                        .dosageStrength(setting != null ? setting.getDosageStrength() : (sku != null ? sku.getDosageStrength() : ""))
+                        .packagingUnit(setting != null ? setting.getPackagingUnit() : (sku != null ? sku.getPackagingUnit() : ""))
+                        .currentStock(pooledStock)
                         .requestedUnits(units)
                         .estimatedPrice(estPrice)
                         .estimatedPricePerUnit(perUnit)

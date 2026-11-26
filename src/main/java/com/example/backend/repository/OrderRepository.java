@@ -41,7 +41,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            "     EXISTS ( " +
            "         SELECT 1 FROM OrderedItem oi " +
            "         LEFT JOIN oi.sku sku " +
-           "         LEFT JOIN sku.libMedicine med " +
+           "         LEFT JOIN sku.genericStockSetting g " +
+           "         LEFT JOIN g.libMedicine med " +
            "         WHERE oi.order = o AND ( " +
            "             LOWER(sku.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "             LOWER(sku.brandName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -61,7 +62,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            "     EXISTS ( " +
            "         SELECT 1 FROM OrderedItem oi " +
            "         LEFT JOIN oi.sku sku " +
-           "         LEFT JOIN sku.libMedicine med " +
+           "         LEFT JOIN sku.genericStockSetting g " +
+           "         LEFT JOIN g.libMedicine med " +
            "         WHERE oi.order = o AND ( " +
            "             LOWER(sku.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "             LOWER(sku.brandName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +

@@ -15,12 +15,16 @@ public interface OrderedItemRepository extends JpaRepository<OrderedItem, Long> 
 
     @Query("SELECT oi FROM OrderedItem oi " +
            "LEFT JOIN FETCH oi.sku sku " +
-           "LEFT JOIN FETCH sku.libMedicine " +
+           "LEFT JOIN FETCH sku.genericStockSetting g " +
+           "LEFT JOIN FETCH g.libMedicine " +
            "WHERE oi.order.id IN :orderIds")
     List<OrderedItem> findByOrderIdInWithSku(@Param("orderIds") List<Long> orderIds);
 
-    @Query("SELECT oi FROM OrderedItem oi JOIN oi.order o WHERE " +
-           "o.pharmacy.id = :pharmacyId AND " +
+    @Query("SELECT oi FROM OrderedItem oi " +
+           "JOIN oi.order o " +
+           "LEFT JOIN FETCH oi.sku sku " +
+           "LEFT JOIN FETCH sku.genericStockSetting " +
+           "WHERE o.pharmacy.id = :pharmacyId AND " +
            "o.status IN (com.example.backend.entity.Order.Status.Pending, com.example.backend.entity.Order.Status.Approved, com.example.backend.entity.Order.Status.Partially_Received)")
     List<OrderedItem> findActiveOrderedItemsByPharmacyId(@Param("pharmacyId") Long pharmacyId);
 

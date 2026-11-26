@@ -50,6 +50,7 @@ import java.util.stream.Collectors;
 public class SkuService {
 
     private final SkuRepository skuRepository;
+    private final GenericStockSettingService genericStockSettingService;
     private final PharmacyRepository pharmacyRepository;
     private final LibMedicineRepository libMedicineRepository;
     private final BatchService batchService;
@@ -63,6 +64,7 @@ public class SkuService {
     private final ApplicationEventPublisher applicationEventPublisher;
 
     public SkuService(SkuRepository skuRepository,
+                      GenericStockSettingService genericStockSettingService,
                       PharmacyRepository pharmacyRepository,
                       LibMedicineRepository libMedicineRepository,
                       BatchService batchService,
@@ -75,6 +77,7 @@ public class SkuService {
                       FacilityAccessGuard facilityAccessGuard,
                       ApplicationEventPublisher applicationEventPublisher) {
         this.skuRepository = skuRepository;
+        this.genericStockSettingService = genericStockSettingService;
         this.pharmacyRepository = pharmacyRepository;
         this.libMedicineRepository = libMedicineRepository;
         this.batchService = batchService;
@@ -396,9 +399,9 @@ public class SkuService {
         return cleanBrand + "-" + genericPart + strengthDigits + "-" + formCode + "-" + packCode;
     }
 
-    // 1. CREATE SKU (Units field is automatically defaulted to 0 by @PrePersist in Sku entity)
+    // 1. CREATE BRAND SKU (Allowed for Pharmacist, SuperAdmin, Admin, and Procurement for inline brand creation)
     @Transactional
-    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
+    @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist', 'Procurement')")
     public SkuResponseDto createSku(SkuRequestDto request) {
         if (request.getPharmacyId() == null) {
             throw new RuntimeException("Pharmacy ID is required.");
@@ -410,21 +413,12 @@ public class SkuService {
         LibMedicine libMedicine = libMedicineRepository.findById(request.getMedicineId())
                 .orElseThrow(() -> new RuntimeException("Medicine not found with id: " + request.getMedicineId()));
 
-        if (request.getReorderLevel() <= request.getMinimumLevel()) {
-            throw new RuntimeException("Reorder level must be greater than minimum level threshold");
-        }
-
-        if (request.getMaximumLevel() <= request.getReorderLevel()) {
-            throw new RuntimeException("Maximum capacity must be greater than reorder level threshold");
-        }
-
-        // 1. Resolve Dosage Form
+        // 1. Resolve Dosage Form & Strength
         String dosageForm = (request.getDosageForm() != null && !request.getDosageForm().trim().isEmpty())
                 ? request.getDosageForm().trim()
                 : extractDosageForm(libMedicine);
         String formCode = getDosageFormCode(dosageForm);
 
-        // Resolve Dosage Strength
         String dosageStrength = (request.getDosageStrength() != null && !request.getDosageStrength().trim().isEmpty())
                 ? request.getDosageStrength().trim()
                 : extractStrength(libMedicine);
@@ -432,7 +426,19 @@ public class SkuService {
         // 2. Resolve Packaging Unit
         PackagingInfo packagingInfo = resolvePackaging(request, libMedicine);
 
-        // 3. Generate Clean Deterministic 5-Letter SKU Identifier (or use requested name if provided)
+        // 3. Resolve or Create GenericStockSetting
+        com.example.backend.entity.GenericStockSetting setting = genericStockSettingService.resolveOrCreateSetting(
+                pharmacy,
+                libMedicine,
+                dosageForm,
+                dosageStrength,
+                packagingInfo.name,
+                request.getMinimumLevel(),
+                request.getReorderLevel(),
+                request.getMaximumLevel()
+        );
+
+        // 4. Generate Clean Deterministic 5-Letter SKU Identifier (or use requested name if provided)
         String skuName = (request.getName() != null && !request.getName().trim().isEmpty())
                 ? request.getName().trim().toUpperCase()
                 : generateSkuCode(request.getBrandName(), libMedicine, formCode, packagingInfo.code);
@@ -447,19 +453,13 @@ public class SkuService {
         }
 
         Sku sku = new Sku();
-        sku.setPharmacy(pharmacy);
-        sku.setLibMedicine(libMedicine);
+        sku.setGenericStockSetting(setting);
         sku.setName(skuName);
-        sku.setBrandName(request.getBrandName().trim());
-        sku.setDosageForm(dosageForm);
-        sku.setDosageStrength(dosageStrength);
-        sku.setPackagingUnit(packagingInfo.name);
-        sku.setMinimumLevel(request.getMinimumLevel());
-        sku.setReorderLevel(request.getReorderLevel());
-        sku.setMaximumLevel(request.getMaximumLevel());
+        sku.setBrandName(request.getBrandName().trim().toUpperCase());
         sku.setStatus(request.getStatus() != null ? request.getStatus() : Sku.Status.Active);
 
         Sku savedSku = skuRepository.save(sku);
+        genericStockSettingService.recalculateTotalUnits(setting.getId());
         applicationEventPublisher.publishEvent(new StockChangedEvent(savedSku.getId()));
 
         auditLogService.logAction(
@@ -471,115 +471,14 @@ public class SkuService {
                 AuditLog.Severity.SUCCESS,
                 savedSku.getName(),
                 savedSku.getId(),
-                "Registered new SKU '" + savedSku.getName() + "' (" + (savedSku.getBrandName() != null ? savedSku.getBrandName() : "") + ") in catalog.",
-                "Admin,Pharmacist"
+                "Registered new brand SKU '" + savedSku.getName() + "' (" + (savedSku.getBrandName() != null ? savedSku.getBrandName() : "") + ") under generic pool '" + libMedicine.getDrugDescription() + "' (" + packagingInfo.name + ").",
+                "Admin,Pharmacist,Procurement"
         );
 
         return mapToResponseDto(savedSku, "SKU created successfully");
     }
 
-    // 2. GET SKUS PAGINATED (with debounced search, status filter, and stock level filter)
-    @Transactional
-    @PreAuthorize("isAuthenticated()")
-    public PageResponseDto<SkuResponseDto> getSkusPaginated(
-            Long pharmacyId,
-            String search,
-            String status,
-            String stockStatus,
-            int page,
-            int size,
-            String sortBy,
-            String sortDir) {
-
-        if (pharmacyId == null) {
-            throw new RuntimeException("Pharmacy ID is strictly required.");
-        }
-        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
-        if (!pharmacyRepository.existsById(pharmacyId)) {
-            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
-        }
-
-        // Ensure past-due batches have their status marked Expired
-        batchService.markPastDueBatchesAsExpired(pharmacyId);
-
-        int pageIndex = Math.max(0, page);
-        int pageSize = size > 0 ? size : 10;
-
-        Sort.Direction direction = "DESC".equalsIgnoreCase(sortDir) ? Sort.Direction.DESC : Sort.Direction.ASC;
-        String sortProperty = (sortBy != null && !sortBy.isBlank()) ? sortBy.trim() : "genericName";
-
-        Sort sort;
-        if ("genericName".equalsIgnoreCase(sortProperty)
-                || "drugDescription".equalsIgnoreCase(sortProperty)
-                || "libMedicine.drugDescription".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "libMedicine.drugDescription").and(Sort.by(direction, "brandName"));
-        } else if ("brandName".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "brandName");
-        }
-        else if ("sku".equalsIgnoreCase(sortProperty) || "name".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "name");
-        else if ("currentStock".equalsIgnoreCase(sortProperty) || "units".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "units");
-        else if ("minimumLevel".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "minimumLevel");
-        else if ("reorderLevel".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "reorderLevel");
-        else if ("maximumLevel".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "maximumLevel");
-        else if ("createdAt".equalsIgnoreCase(sortProperty)) sort = Sort.by(direction, "createdAt");
-        else sort = Sort.by(direction, "libMedicine.drugDescription").and(Sort.by(direction, "brandName"));
-
-        Pageable pageable = PageRequest.of(pageIndex, pageSize, sort);
-
-        String trimmedSearch = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        String trimmedStatus = (status != null && !status.trim().isEmpty()) ? status.trim().toUpperCase() : "ALL";
-        String trimmedStockStatus = (stockStatus != null && !stockStatus.trim().isEmpty()) ? stockStatus.trim().toUpperCase() : "ALL";
-
-        // Backwards-compatibility check if status holds legacy stockStatus value
-        if (trimmedStockStatus.equals("ALL") && (trimmedStatus.equals("OPTIMAL") || trimmedStatus.equals("REORDER") || trimmedStatus.equals("CRITICAL") || trimmedStatus.equals("OUT_OF_STOCK"))) {
-            trimmedStockStatus = trimmedStatus;
-            trimmedStatus = "ALL";
-        }
-
-        Page<Sku> skuPage = skuRepository.findSkusPaginated(pharmacyId, trimmedSearch, trimmedStatus, trimmedStockStatus, pageable);
-        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
-
-        Page<SkuResponseDto> dtoPage = skuPage.map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())));
-        return PageResponseDto.from(dtoPage);
-    }
-
-    // Overloaded helper for callers specifying only status
-    @Transactional
-    @PreAuthorize("isAuthenticated()")
-    public PageResponseDto<SkuResponseDto> getSkusPaginated(
-            Long pharmacyId,
-            String search,
-            String status,
-            int page,
-            int size,
-            String sortBy,
-            String sortDir) {
-        return getSkusPaginated(pharmacyId, search, status, null, page, size, sortBy, sortDir);
-    }
-
-    // 2b. GET SKU SUMMARY KPIS
-    @Transactional(readOnly = true)
-    @PreAuthorize("isAuthenticated()")
-    public SkuSummaryDto getSkuSummary(Long pharmacyId) {
-        if (pharmacyId == null) {
-            throw new RuntimeException("Pharmacy ID is strictly required.");
-        }
-        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
-
-        long totalSkus = skuRepository.countByPharmacyId(pharmacyId);
-        long optimalCount = skuRepository.countOptimalByPharmacyId(pharmacyId);
-        long reorderCount = skuRepository.countReorderNeededByPharmacyId(pharmacyId);
-        long criticalCount = skuRepository.countCriticalByPharmacyId(pharmacyId);
-
-        return SkuSummaryDto.builder()
-                .totalSkus(totalSkus)
-                .optimalCount(optimalCount)
-                .reorderCount(reorderCount)
-                .criticalCount(criticalCount)
-                .build();
-    }
-
-    // 2c. GET LIGHTWEIGHT SKU DROPDOWN LIST (For modal selectors)
+    // 2. GET LIGHTWEIGHT SKU DROPDOWN LIST (For Bin Card brand selector)
     @Transactional(readOnly = true)
     @PreAuthorize("isAuthenticated()")
     public List<SkuDropdownDto> getDropdownSkus(Long pharmacyId) {
@@ -603,71 +502,62 @@ public class SkuService {
                 .build()).collect(Collectors.toList());
     }
 
-    // 3. GET SKU BY ID
-    @PreAuthorize("isAuthenticated()")
-    public SkuResponseDto getSkuById(Long id) {
-        Sku sku = skuRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
-        if (sku.getPharmacy() != null) {
-            facilityAccessGuard.verifyPharmacyAccess(sku.getPharmacy().getId());
-        }
-        return mapToResponseDto(sku, null);
-    }
-
-    // 4. UPDATE SKU
+    // 3. UPDATE BRAND SKU
     @Transactional
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public SkuResponseDto updateSku(Long id, SkuRequestDto request) {
         Sku existingSku = skuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new RuntimeException("SKU not found with id: " + id));
 
-        if (existingSku.getPharmacy() != null) {
-            facilityAccessGuard.verifyPharmacyAccess(existingSku.getPharmacy().getId());
+        com.example.backend.entity.GenericStockSetting currentSetting = existingSku.getGenericStockSetting();
+        Long oldSettingId = currentSetting != null ? currentSetting.getId() : null;
+        Pharmacy targetPharmacy = currentSetting != null ? currentSetting.getPharmacy() : null;
+        if (targetPharmacy != null) {
+            facilityAccessGuard.verifyPharmacyAccess(targetPharmacy.getId());
         }
 
         if (request.getPharmacyId() != null) {
             facilityAccessGuard.verifyPharmacyAccess(request.getPharmacyId());
-            if (existingSku.getPharmacy() == null || !existingSku.getPharmacy().getId().equals(request.getPharmacyId())) {
-                Pharmacy newPharmacy = pharmacyRepository.findById(request.getPharmacyId())
+            if (targetPharmacy == null || !targetPharmacy.getId().equals(request.getPharmacyId())) {
+                targetPharmacy = pharmacyRepository.findById(request.getPharmacyId())
                         .orElseThrow(() -> new RuntimeException("Pharmacy not found with id: " + request.getPharmacyId()));
-                existingSku.setPharmacy(newPharmacy);
             }
         }
 
-        // If medicine changed
-        if (!existingSku.getLibMedicine().getId().equals(request.getMedicineId())) {
-            LibMedicine newMedicine = libMedicineRepository.findById(request.getMedicineId())
+        LibMedicine targetMedicine = currentSetting != null ? currentSetting.getLibMedicine() : null;
+        if (request.getMedicineId() != null && (targetMedicine == null || !targetMedicine.getId().equals(request.getMedicineId()))) {
+            targetMedicine = libMedicineRepository.findById(request.getMedicineId())
                     .orElseThrow(() -> new RuntimeException("Medicine not found with id: " + request.getMedicineId()));
-            existingSku.setLibMedicine(newMedicine);
         }
 
-        if (request.getReorderLevel() <= request.getMinimumLevel()) {
-            throw new RuntimeException("Reorder level must be greater than minimum level threshold");
-        }
+        String targetDosageForm = (request.getDosageForm() != null && !request.getDosageForm().trim().isEmpty())
+                ? request.getDosageForm().trim()
+                : (currentSetting != null ? currentSetting.getDosageForm() : extractDosageForm(targetMedicine));
+        String targetDosageStrength = (request.getDosageStrength() != null && !request.getDosageStrength().trim().isEmpty())
+                ? request.getDosageStrength().trim()
+                : (currentSetting != null ? currentSetting.getDosageStrength() : extractStrength(targetMedicine));
 
-        if (request.getMaximumLevel() <= request.getReorderLevel()) {
-            throw new RuntimeException("Maximum capacity must be greater than reorder level threshold");
-        }
-
-        // Dosage Form
-        if (request.getDosageForm() != null && !request.getDosageForm().trim().isEmpty()) {
-            existingSku.setDosageForm(request.getDosageForm().trim());
-        }
-
-        // Dosage Strength
-        if (request.getDosageStrength() != null && !request.getDosageStrength().trim().isEmpty()) {
-            existingSku.setDosageStrength(request.getDosageStrength().trim());
-        }
-
-        // Packaging Unit
+        String targetPackagingUnit = currentSetting != null ? currentSetting.getPackagingUnit() : "Box of 100";
         if ((request.getPackagingUnitCode() != null && !request.getPackagingUnitCode().trim().isEmpty())
                 || (request.getPackagingUnit() != null && !request.getPackagingUnit().trim().isEmpty())) {
-            PackagingInfo packInfo = resolvePackaging(request, existingSku.getLibMedicine());
-            existingSku.setPackagingUnit(packInfo.name);
+            PackagingInfo packInfo = resolvePackaging(request, targetMedicine);
+            targetPackagingUnit = packInfo.name;
         }
 
+        com.example.backend.entity.GenericStockSetting targetSetting = genericStockSettingService.resolveOrCreateSetting(
+                targetPharmacy,
+                targetMedicine,
+                targetDosageForm,
+                targetDosageStrength,
+                targetPackagingUnit,
+                request.getMinimumLevel() != null ? request.getMinimumLevel() : (currentSetting != null ? currentSetting.getMinimumLevel() : 10L),
+                request.getReorderLevel() != null ? request.getReorderLevel() : (currentSetting != null ? currentSetting.getReorderLevel() : 50L),
+                request.getMaximumLevel() != null ? request.getMaximumLevel() : (currentSetting != null ? currentSetting.getMaximumLevel() : 500L)
+        );
+        existingSku.setGenericStockSetting(targetSetting);
+
         if (request.getBrandName() != null && !request.getBrandName().trim().isEmpty()) {
-            existingSku.setBrandName(request.getBrandName().trim());
+            existingSku.setBrandName(request.getBrandName().trim().toUpperCase());
         }
 
         // SKU Name
@@ -675,20 +565,21 @@ public class SkuService {
         if (request.getName() != null && !request.getName().trim().isEmpty()) {
             newName = request.getName().trim().toUpperCase();
         }
-        if (existingSku.getPharmacy() != null &&
-                skuRepository.existsByPharmacyIdAndNameAndIdNot(existingSku.getPharmacy().getId(), newName, existingSku.getId())) {
+        if (targetPharmacy != null &&
+                skuRepository.existsByPharmacyIdAndNameAndIdNot(targetPharmacy.getId(), newName, existingSku.getId())) {
             throw new RuntimeException("SKU code '" + newName + "' already exists in this pharmacy.");
         }
         existingSku.setName(newName);
 
-        existingSku.setMinimumLevel(request.getMinimumLevel());
-        existingSku.setReorderLevel(request.getReorderLevel());
-        existingSku.setMaximumLevel(request.getMaximumLevel());
         if (request.getStatus() != null) {
             existingSku.setStatus(request.getStatus());
         }
 
         Sku updatedSku = skuRepository.save(existingSku);
+        if (oldSettingId != null && !oldSettingId.equals(targetSetting.getId())) {
+            genericStockSettingService.recalculateTotalUnits(oldSettingId);
+        }
+        genericStockSettingService.recalculateTotalUnits(targetSetting.getId());
         applicationEventPublisher.publishEvent(new StockChangedEvent(updatedSku.getId()));
 
         auditLogService.logAction(
@@ -700,7 +591,7 @@ public class SkuService {
                 AuditLog.Severity.INFO,
                 updatedSku.getName(),
                 updatedSku.getId(),
-                "Updated SKU details for '" + updatedSku.getName() + "'. Dosage: " + updatedSku.getDosageForm() + ", Reorder: " + updatedSku.getReorderLevel() + ", Max: " + updatedSku.getMaximumLevel() + ", Status: " + updatedSku.getStatus() + ".",
+                "Updated brand SKU details for '" + updatedSku.getName() + "' (" + updatedSku.getBrandName() + "). Status: " + updatedSku.getStatus() + ".",
                 "Admin,Pharmacist"
         );
 
@@ -720,6 +611,9 @@ public class SkuService {
 
         sku.setStatus(Sku.Status.Inactive);
         skuRepository.save(sku);
+        if (sku.getGenericStockSetting() != null) {
+            genericStockSettingService.recalculateTotalUnits(sku.getGenericStockSetting().getId());
+        }
         applicationEventPublisher.publishEvent(new StockChangedEvent(sku.getId()));
 
         auditLogService.logAction(
@@ -749,6 +643,9 @@ public class SkuService {
 
         sku.setStatus(Sku.Status.Active);
         Sku saved = skuRepository.save(sku);
+        if (saved.getGenericStockSetting() != null) {
+            genericStockSettingService.recalculateTotalUnits(saved.getGenericStockSetting().getId());
+        }
         applicationEventPublisher.publishEvent(new StockChangedEvent(saved.getId()));
 
         auditLogService.logAction(
@@ -816,6 +713,9 @@ public class SkuService {
 
         sku.setUnits(newUnits);
         Sku savedSku = skuRepository.save(sku);
+        if (savedSku.getGenericStockSetting() != null) {
+            genericStockSettingService.recalculateTotalUnits(savedSku.getGenericStockSetting().getId());
+        }
         applicationEventPublisher.publishEvent(new StockChangedEvent(savedSku.getId()));
 
         boolean isDispensed = request.getReason() != null && "DISPENSED".equalsIgnoreCase(request.getReason().trim());
@@ -1025,106 +925,6 @@ public class SkuService {
         return mapToResponseDto(savedSku, "Stock adjusted successfully");
     }
 
-    // 7. GET SKUS THAT NEED REORDERING (units <= reorderLevel, excluding active Pending/Approved orders)
-    @Transactional(readOnly = true)
-    @PreAuthorize("isAuthenticated()")
-    public PageResponseDto<SkuResponseDto> getReorderNeededSkus(
-            Long pharmacyId,
-            String search,
-            String stockStatus,
-            int page,
-            int size,
-            String sortBy,
-            String sortDir) {
-        if (pharmacyId == null) {
-            throw new RuntimeException("Pharmacy ID is strictly required.");
-        }
-        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
-        if (!pharmacyRepository.existsById(pharmacyId)) {
-            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
-        }
-
-        batchService.markPastDueBatchesAsExpired(pharmacyId);
-
-        int pageIndex = Math.max(0, page);
-        int pageSize = size > 0 ? size : 10;
-
-        Sort.Direction direction = "DESC".equalsIgnoreCase(sortDir) ? Sort.Direction.DESC : Sort.Direction.ASC;
-        String sortProperty = (sortBy != null && !sortBy.isBlank()) ? sortBy.trim() : "genericName";
-
-        Sort sort;
-        if ("genericName".equalsIgnoreCase(sortProperty)
-                || "drugDescription".equalsIgnoreCase(sortProperty)
-                || "libMedicine.drugDescription".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "libMedicine.drugDescription").and(Sort.by(direction, "brandName"));
-        } else if ("brandName".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "brandName");
-        } else if ("units".equalsIgnoreCase(sortProperty) || "currentStock".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "units");
-        } else if ("reorder".equalsIgnoreCase(sortProperty) || "reorderLevel".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "reorderLevel");
-        } else if ("critical".equalsIgnoreCase(sortProperty) || "minimumLevel".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "minimumLevel");
-        } else if ("urgency".equalsIgnoreCase(sortProperty) || "status".equalsIgnoreCase(sortProperty)) {
-            sort = Sort.by(direction, "minimumLevel").and(Sort.by(direction, "units"));
-        } else {
-            sort = Sort.by(direction, "name");
-        }
-
-        Pageable pageable = PageRequest.of(pageIndex, pageSize, sort);
-        String query = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        String statusFilter = (stockStatus != null && !stockStatus.isBlank()) ? stockStatus.trim().toUpperCase() : "ALL";
-
-        Page<Sku> skuPage = skuRepository.findReorderNeededSkus(pharmacyId, query, statusFilter, pageable);
-        Map<Long, SkuOrderMetrics> activeMetricsMap = getActiveOrderMetricsMap(pharmacyId);
-
-        Page<SkuResponseDto> dtoPage = skuPage.map(sku -> mapToResponseDto(sku, null, activeMetricsMap.get(sku.getId())));
-        return PageResponseDto.from(dtoPage);
-    }
-
-    @Transactional(readOnly = true)
-    @PreAuthorize("isAuthenticated()")
-    public PageResponseDto<SkuResponseDto> getReorderNeededSkus(
-            Long pharmacyId,
-            String search,
-            int page,
-            int size,
-            String sortBy,
-            String sortDir) {
-        return getReorderNeededSkus(pharmacyId, search, "ALL", page, size, sortBy, sortDir);
-    }
-
-    @Transactional(readOnly = true)
-    @PreAuthorize("isAuthenticated()")
-    public PageResponseDto<SkuResponseDto> getReorderNeededSkus(Long pharmacyId, String search) {
-        return getReorderNeededSkus(pharmacyId, search, "ALL", 0, 10, "genericName", "ASC");
-    }
-
-    // 7b. GET REORDER NEEDED KPI SUMMARY (Counts excluding active Pending/Approved/Partially_Received orders)
-    @Transactional(readOnly = true)
-    @PreAuthorize("isAuthenticated()")
-    public ReorderNeededSummaryDto getReorderNeededSummary(Long pharmacyId) {
-        if (pharmacyId == null) {
-            throw new RuntimeException("Pharmacy ID is strictly required.");
-        }
-        facilityAccessGuard.verifyPharmacyAccess(pharmacyId);
-        if (!pharmacyRepository.existsById(pharmacyId)) {
-            throw new RuntimeException("Pharmacy not found with id: " + pharmacyId);
-        }
-
-        batchService.markPastDueBatchesAsExpired(pharmacyId);
-
-        long total = skuRepository.countTotalReorderNeededByPharmacyId(pharmacyId);
-        long critical = skuRepository.countCriticalReorderNeededByPharmacyId(pharmacyId);
-        long reorderOnly = Math.max(0, total - critical);
-
-        return ReorderNeededSummaryDto.builder()
-                .totalReorderCount(total)
-                .criticalCount(critical)
-                .reorderOnlyCount(reorderOnly)
-                .build();
-    }
-
     private static class SkuOrderMetrics {
         long pendingUnits = 0L;
         long toReceiveUnits = 0L;
@@ -1196,6 +996,7 @@ public class SkuService {
     private SkuResponseDto mapToResponseDto(Sku sku, String message, SkuOrderMetrics metrics) {
         SkuResponseDto dto = new SkuResponseDto();
         dto.setId(sku.getId());
+        dto.setGenericStockSettingId(sku.getGenericStockSetting() != null ? sku.getGenericStockSetting().getId() : null);
 
         if (sku.getPharmacy() != null) {
             dto.setPharmacyId(sku.getPharmacy().getId());
@@ -1214,6 +1015,7 @@ public class SkuService {
         dto.setDosageStrength(sku.getDosageStrength());
         dto.setPackagingUnit(sku.getPackagingUnit());
         dto.setUnits(sku.getUnits() != null ? sku.getUnits() : 0L);
+        dto.setGroupTotalUnits(sku.getGroupTotalUnits() != null ? sku.getGroupTotalUnits() : dto.getUnits());
         dto.setMinimumLevel(sku.getMinimumLevel());
         dto.setReorderLevel(sku.getReorderLevel());
         dto.setMaximumLevel(sku.getMaximumLevel());

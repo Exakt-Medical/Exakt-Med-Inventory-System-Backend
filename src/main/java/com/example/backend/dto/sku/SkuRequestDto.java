@@ -33,13 +33,10 @@ public class SkuRequestDto {
 
     private String packagingUnitCode;
 
-    @NotNull(message = "Minimum level is required")
     private Long minimumLevel;
 
-    @NotNull(message = "Reorder level is required")
     private Long reorderLevel;
 
-    @NotNull(message = "Maximum level is required")
     private Long maximumLevel;
 
     private Sku.Status status;

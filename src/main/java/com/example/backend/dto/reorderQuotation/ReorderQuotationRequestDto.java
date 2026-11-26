@@ -21,7 +21,7 @@ public class ReorderQuotationRequestDto {
     @NotNull(message = "Pharmacy ID is required")
     private Long pharmacyId;
 
-    @NotNull(message = "Supplier ID is required")
+    // Optional: Pharmacist can omit supplier and let Procurement choose when converting to PO
     private Long supplierId;
 
     @Builder.Default

@@ -38,7 +38,7 @@ public class ReorderQuotation {
     private Pharmacy pharmacy;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "supplierId", nullable = false)
+    @JoinColumn(name = "supplierId", nullable = true)
     private Supplier supplier;
 
     @ManyToOne(fetch = FetchType.LAZY)

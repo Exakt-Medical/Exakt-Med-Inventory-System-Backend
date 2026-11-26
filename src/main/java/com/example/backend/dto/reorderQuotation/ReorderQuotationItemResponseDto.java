@@ -14,6 +14,8 @@ import lombok.Setter;
 public class ReorderQuotationItemResponseDto {
 
     private Long id;
+    private Long genericStockSettingId;
+    private Long medicineId;
     private Long skuId;
     private String skuCode;
     private String brandName;
@@ -27,4 +29,3 @@ public class ReorderQuotationItemResponseDto {
     private Double estimatedPricePerUnit;
     private String notes;
 }
-

@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 public class SkuResponseDto {
 
     private Long id;
+    private Long genericStockSettingId;
     private Long pharmacyId;
     private String pharmacyName;
     private Long medicineId;
@@ -26,6 +27,7 @@ public class SkuResponseDto {
     private String dosageStrength;
     private String packagingUnit;
     private Long units;
+    private Long groupTotalUnits;
     private Long minimumLevel;
     private Long reorderLevel;
     private Long maximumLevel;

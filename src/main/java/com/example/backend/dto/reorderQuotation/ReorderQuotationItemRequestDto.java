@@ -15,7 +15,10 @@ import lombok.Setter;
 @Builder
 public class ReorderQuotationItemRequestDto {
 
-    @NotNull(message = "SKU ID is required")
+    // Generic-first: preferred identifier when Pharmacist requests a generic medicine
+    private Long genericStockSettingId;
+
+    // Optional fallback / legacy: if skuId is provided without genericStockSettingId, backend resolves setting from SKU
     private Long skuId;
 
     @NotNull(message = "Requested units is required")
@@ -27,4 +30,3 @@ public class ReorderQuotationItemRequestDto {
 
     private String notes;
 }
-

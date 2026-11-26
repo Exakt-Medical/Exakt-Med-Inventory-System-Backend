@@ -49,7 +49,7 @@ public class DashboardService {
         this.facilityAccessGuard = facilityAccessGuard;
     }
 
-    // 1. GET PHARMACIST DASHBOARD
+    // 1. GET PHARMACIST DASHBOARD (Generic-based via GenericStockSetting)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Pharmacist')")
     public PharmacistDashboardResponseDto getPharmacistDashboard(Long pharmacyId) {
         if (pharmacyId == null) {
@@ -63,25 +63,44 @@ public class DashboardService {
         String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : null;
         String pharmacyName = pharmacy.getPharmacyName();
 
-        List<Sku> skus = skuRepository.findByPharmacyId(pharmacyId);
+        List<Sku> skus = skuRepository.findByPharmacyIdWithSettingAndMedicine(pharmacyId);
         List<Batch> batches = batchRepository.findByPharmacyIdOrderByReceivedAtDesc(pharmacyId);
 
         LocalDate today = LocalDate.now();
         LocalDate nearExpiryLimit = today.plusDays(90);
 
-        // 1. Compute Metrics
-        long totalSkus = skus.size();
-        long totalStockQuantity = skus.stream()
-                .mapToLong(s -> s.getUnits() != null ? s.getUnits() : 0L)
-                .sum();
-        long totalLowStock = skus.stream()
-                .filter(s -> s.getUnits() != null && s.getMinimumLevel() != null &&
-                        s.getUnits() <= s.getMinimumLevel() && s.getUnits() > 0)
-                .count();
-        long totalOverStock = skus.stream()
-                .filter(s -> s.getUnits() != null && s.getMaximumLevel() != null &&
-                        s.getUnits() >= s.getMaximumLevel())
-                .count();
+        // Distinct active GenericStockSettings (having at least 1 Active brand SKU)
+        Map<Long, GenericStockSetting> activeSettingsMap = new LinkedHashMap<>();
+        for (Sku s : skus) {
+            if ((s.getStatus() == null || s.getStatus() == Sku.Status.Active) && s.getGenericStockSetting() != null) {
+                activeSettingsMap.putIfAbsent(s.getGenericStockSetting().getId(), s.getGenericStockSetting());
+            }
+        }
+        List<GenericStockSetting> activeSettings = new ArrayList<>(activeSettingsMap.values());
+
+        long totalSkus = activeSettings.size();
+        long totalStockQuantity = activeSettings.stream().mapToLong(this::getPooledUnits).sum();
+        long totalLowStock = 0L;
+        long totalOverStock = 0L;
+        long outOfStockGroups = 0L;
+
+        for (GenericStockSetting setting : activeSettings) {
+            long pooled = getPooledUnits(setting);
+            Long reorder = setting.getReorderLevel();
+            Long min = setting.getMinimumLevel();
+            Long max = setting.getMaximumLevel();
+
+            if (pooled <= 0) {
+                outOfStockGroups++;
+            }
+            if ((reorder != null && pooled <= reorder) || (reorder == null && min != null && pooled <= min)) {
+                totalLowStock++;
+            }
+            if (max != null && pooled >= max) {
+                totalOverStock++;
+            }
+        }
+
         long totalExpiry = batches.stream()
                 .filter(b -> b.getExpiryDate() != null && b.getExpiryDate().isBefore(today))
                 .count();
@@ -106,11 +125,11 @@ public class DashboardService {
                 .totalQuarantined(totalQuarantined)
                 .build();
 
-        // 2. Stock Distribution by Category / Dosage Form
-        Map<String, Long> categoryStockMap = skus.stream()
+        // 2. Stock Distribution by Normalized Dosage Form
+        Map<String, Long> categoryStockMap = activeSettings.stream()
                 .collect(Collectors.groupingBy(
                         this::getCategoryName,
-                        Collectors.summingLong(s -> s.getUnits() != null ? s.getUnits() : 0L)
+                        Collectors.summingLong(this::getPooledUnits)
                 ));
 
         List<PharmacistDashboardResponseDto.CategoryStockDistribution> stockDistribution = new ArrayList<>();
@@ -125,30 +144,34 @@ public class DashboardService {
         }
         stockDistribution.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
 
-        // 3. Category Health Bar Data
-        Map<String, List<Sku>> categorySkusMap = skus.stream()
+        // 3. Category Health Bar Data (Generic-based, normalized case)
+        Map<String, List<GenericStockSetting>> categoryGroupsMap = activeSettings.stream()
                 .collect(Collectors.groupingBy(this::getCategoryName));
 
         List<PharmacistDashboardResponseDto.CategoryHealthBar> healthBarData = new ArrayList<>();
-        for (Map.Entry<String, List<Sku>> entry : categorySkusMap.entrySet()) {
+        for (Map.Entry<String, List<GenericStockSetting>> entry : categoryGroupsMap.entrySet()) {
             String category = entry.getKey();
-            List<Sku> catSkus = entry.getValue();
+            long low = 0L;
+            long over = 0L;
+            long out = 0L;
+            long optimal = 0L;
 
-            long low = catSkus.stream()
-                    .filter(s -> s.getUnits() != null && s.getMinimumLevel() != null &&
-                            s.getUnits() <= s.getMinimumLevel() && s.getUnits() > 0)
-                    .count();
-            long over = catSkus.stream()
-                    .filter(s -> s.getUnits() != null && s.getMaximumLevel() != null &&
-                            s.getUnits() >= s.getMaximumLevel())
-                    .count();
-            long out = catSkus.stream()
-                    .filter(s -> s.getUnits() == null || s.getUnits() <= 0)
-                    .count();
-            long optimal = catSkus.stream()
-                    .filter(s -> s.getUnits() != null && s.getMinimumLevel() != null && s.getMaximumLevel() != null &&
-                            s.getUnits() > s.getMinimumLevel() && s.getUnits() < s.getMaximumLevel())
-                    .count();
+            for (GenericStockSetting setting : entry.getValue()) {
+                long pooled = getPooledUnits(setting);
+                Long min = setting.getMinimumLevel();
+                Long reorder = setting.getReorderLevel();
+                Long max = setting.getMaximumLevel();
+
+                if (pooled <= 0) {
+                    out++;
+                } else if ((reorder != null && pooled <= reorder) || (reorder == null && min != null && pooled <= min)) {
+                    low++;
+                } else if (max != null && pooled >= max) {
+                    over++;
+                } else {
+                    optimal++;
+                }
+            }
 
             healthBarData.add(PharmacistDashboardResponseDto.CategoryHealthBar.builder()
                     .category(category)
@@ -158,9 +181,11 @@ public class DashboardService {
                     .optimal(optimal)
                     .build());
         }
+        healthBarData.sort(Comparator.comparing(PharmacistDashboardResponseDto.CategoryHealthBar::getCategory));
 
-        // 4. Urgent Operational Alerts
-        List<PharmacistDashboardResponseDto.UrgentAlert> urgentAlerts = generatePharmacistAlerts(batches, skus, today, totalExpiry, totalNearExpiry, totalQuarantined, totalLowStock);
+        // 4. Urgent Operational Alerts (Generic-based)
+        List<PharmacistDashboardResponseDto.UrgentAlert> urgentAlerts = generatePharmacistAlerts(
+                batches, today, totalExpiry, totalNearExpiry, totalQuarantined, outOfStockGroups, totalLowStock);
 
         return PharmacistDashboardResponseDto.builder()
                 .facilityId(facilityId)
@@ -174,7 +199,7 @@ public class DashboardService {
                 .build();
     }
 
-    // 2. GET PROCUREMENT DASHBOARD
+    // 2. GET PROCUREMENT DASHBOARD (Generic-based via GenericStockSetting)
     @PreAuthorize("hasAnyRole('SuperAdmin', 'Admin', 'Procurement')")
     public ProcurementDashboardResponseDto getProcurementDashboard(Long pharmacyId) {
         if (pharmacyId == null) {
@@ -188,34 +213,41 @@ public class DashboardService {
         String facilityName = pharmacy.getFacility() != null ? pharmacy.getFacility().getName() : null;
         String pharmacyName = pharmacy.getPharmacyName();
 
-        List<Sku> skus = skuRepository.findByPharmacyId(pharmacyId);
+        List<Sku> skus = skuRepository.findByPharmacyIdWithSettingAndMedicine(pharmacyId);
         List<Batch> batches = batchRepository.findByPharmacyIdOrderByReceivedAtDesc(pharmacyId);
         List<Order> orders = orderRepository.findByPharmacyIdOrderByCreatedAtDesc(pharmacyId);
         List<Supplier> suppliers = fetchSuppliers(facilityId, pharmacyId);
 
         LocalDate today = LocalDate.now();
 
-        // Collect SKUs that already have open/in-progress orders
-        // (Pending, Approved, Partially_Received) to prevent duplicate requisitions
-        Set<Long> skusWithActiveOrders = new HashSet<>();
-
+        Set<Long> settingIdsWithActiveOrders = new HashSet<>();
         List<OrderedItem> activeItems = orderedItemRepository.findActiveOrderedItemsByPharmacyId(pharmacyId);
         for (OrderedItem oi : activeItems) {
-            if (oi.getSku() != null && oi.getSku().getId() != null) {
-                skusWithActiveOrders.add(oi.getSku().getId());
+            if (oi.getSku() != null && oi.getSku().getGenericStockSetting() != null) {
+                settingIdsWithActiveOrders.add(oi.getSku().getGenericStockSetting().getId());
             }
         }
 
-        // 1. Metrics
-        long totalReorder = skus.stream()
-                .filter(s -> s.getUnits() != null && s.getReorderLevel() != null &&
-                        s.getUnits() <= s.getReorderLevel() &&
-                        !skusWithActiveOrders.contains(s.getId()))
-                .count();
-        long totalMinimumSkus = skus.stream()
-                .filter(s -> s.getUnits() != null && s.getMinimumLevel() != null &&
-                        s.getUnits() <= s.getMinimumLevel())
-                .count();
+        Map<Long, List<Sku>> activeBySetting = skus.stream()
+                .filter(s -> (s.getStatus() == null || s.getStatus() == Sku.Status.Active) && s.getGenericStockSetting() != null)
+                .collect(Collectors.groupingBy(s -> s.getGenericStockSetting().getId(), LinkedHashMap::new, Collectors.toList()));
+
+        long totalReorder = 0L;
+        long totalMinimumSkus = 0L;
+        for (Map.Entry<Long, List<Sku>> entry : activeBySetting.entrySet()) {
+            GenericStockSetting setting = entry.getValue().get(0).getGenericStockSetting();
+            long pooled = getPooledUnits(setting);
+            Long min = setting.getMinimumLevel();
+            Long reorder = setting.getReorderLevel();
+
+            if (reorder != null && pooled <= reorder && !settingIdsWithActiveOrders.contains(entry.getKey())) {
+                totalReorder++;
+            }
+            if (min != null && pooled <= min) {
+                totalMinimumSkus++;
+            }
+        }
+
         long totalBatches = batches.size();
         long totalPendingOrders = orders.stream()
                 .filter(o -> o.getStatus() == Order.Status.Pending)
@@ -224,7 +256,6 @@ public class DashboardService {
                 .filter(s -> s.getStatus() == Supplier.Status.Active)
                 .count();
 
-        // Total ordered units in current month
         long unitsThisMonth = orders.stream()
                 .filter(o -> o.getCreatedAt() != null &&
                         o.getCreatedAt().getMonth() == today.getMonth() &&
@@ -248,37 +279,42 @@ public class DashboardService {
                 .totalUnitsOrderedMonth(unitsThisMonth)
                 .build();
 
-        // 2. Priority Restock SKUs (excluding SKUs with orders already Pending, Approved, or Partially Receiving)
         String defaultSupplierName = suppliers.stream()
                 .filter(s -> s.getStatus() == Supplier.Status.Active)
                 .map(Supplier::getName)
                 .findFirst()
                 .orElse("Registered Vendor");
 
-        List<ProcurementDashboardResponseDto.PriorityRestockSku> priorityRestockSkus = skus.stream()
-                .filter(s -> s.getUnits() != null && s.getReorderLevel() != null &&
-                        s.getUnits() <= s.getReorderLevel() &&
-                        !skusWithActiveOrders.contains(s.getId()))
-                .sorted(Comparator.comparing((Sku s) -> s.getUnits() <= 0 ? 0 : (s.getUnits() <= s.getMinimumLevel() ? 1 : 2))
-                        .thenComparing(s -> s.getUnits() != null ? s.getUnits() : 0L))
+        // Priority Restock Groups (1 entry per generic + packaging group)
+        List<ProcurementDashboardResponseDto.PriorityRestockSku> priorityRestockSkus = activeBySetting.entrySet().stream()
+                .filter(entry -> !settingIdsWithActiveOrders.contains(entry.getKey()))
+                .map(entry -> entry.getValue().get(0).getGenericStockSetting())
+                .filter(g -> g.getReorderLevel() != null && getPooledUnits(g) <= g.getReorderLevel())
+                .sorted(Comparator
+                        .comparingInt((GenericStockSetting g) -> {
+                            long pooled = getPooledUnits(g);
+                            long min = g.getMinimumLevel() != null ? g.getMinimumLevel() : 0L;
+                            return pooled <= 0 ? 0 : (pooled <= min ? 1 : 2);
+                        })
+                        .thenComparingLong(this::getPooledUnits))
                 .limit(10)
-                .map(s -> {
-                    long currentStock = s.getUnits() != null ? s.getUnits() : 0L;
-                    long min = s.getMinimumLevel() != null ? s.getMinimumLevel() : 0L;
-                    long reorder = s.getReorderLevel() != null ? s.getReorderLevel() : 0L;
+                .map(g -> {
+                    long currentStock = getPooledUnits(g);
+                    long min = g.getMinimumLevel() != null ? g.getMinimumLevel() : 0L;
+                    long reorder = g.getReorderLevel() != null ? g.getReorderLevel() : 0L;
                     String urgency = (currentStock <= 0 || currentStock <= min) ? "CRITICAL" : "REORDER";
-
-                    String generic = (s.getLibMedicine() != null && s.getLibMedicine().getDrugDescription() != null)
-                            ? s.getLibMedicine().getDrugDescription()
-                            : s.getName();
-                    String dosage = (s.getLibMedicine() != null && s.getLibMedicine().getStrengthCode() != null)
-                            ? s.getLibMedicine().getStrengthCode()
-                            : (s.getDosageForm() != null ? s.getDosageForm() : "Standard");
+                    String generic = (g.getLibMedicine() != null && g.getLibMedicine().getDrugDescription() != null)
+                            ? g.getLibMedicine().getDrugDescription()
+                            : "Generic Medicine";
+                    String dosage = (g.getDosageStrength() != null && !g.getDosageStrength().isBlank())
+                            ? g.getDosageStrength()
+                            : (g.getDosageForm() != null ? g.getDosageForm() : "Standard");
+                    int brandCount = activeBySetting.getOrDefault(g.getId(), Collections.emptyList()).size();
 
                     return ProcurementDashboardResponseDto.PriorityRestockSku.builder()
-                            .id(s.getId())
-                            .sku(s.getName())
-                            .brandName(s.getBrandName() != null ? s.getBrandName() : s.getName())
+                            .id(g.getId())
+                            .sku(g.getPackagingUnit())
+                            .brandName(brandCount + (brandCount == 1 ? " Active Brand" : " Active Brands"))
                             .genericName(generic)
                             .dosage(dosage)
                             .currentStock(currentStock)
@@ -290,7 +326,6 @@ public class DashboardService {
                 })
                 .collect(Collectors.toList());
 
-        // 3. Recent Order Requests
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
         List<ProcurementDashboardResponseDto.RecentOrderRequest> recentOrders = orders.stream()
                 .limit(10)
@@ -364,6 +399,10 @@ public class DashboardService {
 
     // --- HELPER METHODS ---
 
+    private long getPooledUnits(GenericStockSetting setting) {
+        return setting != null && setting.getTotalUnits() != null ? setting.getTotalUnits() : 0L;
+    }
+
     private List<Supplier> fetchSuppliers(Long facilityId, Long pharmacyId) {
         if (pharmacyId != null) {
             List<Supplier> byPharmacy = supplierRepository.findByPharmacyId(pharmacyId);
@@ -377,27 +416,30 @@ public class DashboardService {
         return Collections.emptyList();
     }
 
-    private String getCategoryName(Sku sku) {
-        if (sku.getDosageForm() != null && !sku.getDosageForm().trim().isEmpty()) {
-            return sku.getDosageForm().trim();
+    private String getCategoryName(GenericStockSetting setting) {
+        String raw = null;
+        if (setting != null && setting.getDosageForm() != null && !setting.getDosageForm().trim().isEmpty()) {
+            raw = setting.getDosageForm().trim();
+        } else if (setting != null && setting.getLibMedicine() != null && setting.getLibMedicine().getFormCode() != null) {
+            raw = setting.getLibMedicine().getFormCode().trim();
         }
-        if (sku.getLibMedicine() != null && sku.getLibMedicine().getFormCode() != null) {
-            return sku.getLibMedicine().getFormCode().trim();
+        if (raw == null || raw.isEmpty()) {
+            return "General";
         }
-        return "General";
+        String lower = raw.toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 
     private List<PharmacistDashboardResponseDto.UrgentAlert> generatePharmacistAlerts(List<Batch> batches,
-                                                                                      List<Sku> skus,
                                                                                       LocalDate today,
                                                                                       long totalExpiry,
                                                                                       long totalNearExpiry,
                                                                                       long totalQuarantined,
+                                                                                      long outOfStockGroups,
                                                                                       long totalLowStock) {
         List<PharmacistDashboardResponseDto.UrgentAlert> alerts = new ArrayList<>();
         long alertId = 1L;
 
-        // 1. Expired batches
         if (totalExpiry > 0) {
             Batch firstExpired = batches.stream()
                     .filter(b -> b.getExpiryDate() != null && b.getExpiryDate().isBefore(today))
@@ -416,7 +458,6 @@ public class DashboardService {
                     .build());
         }
 
-        // 2. Quarantined batches
         if (totalQuarantined > 0) {
             alerts.add(PharmacistDashboardResponseDto.UrgentAlert.builder()
                     .id(alertId++)
@@ -428,16 +469,12 @@ public class DashboardService {
                     .build());
         }
 
-        // 3. Out of stock / Low stock
-        long outOfStock = skus.stream()
-                .filter(s -> s.getUnits() == null || s.getUnits() <= 0)
-                .count();
-        if (outOfStock > 0) {
+        if (outOfStockGroups > 0) {
             alerts.add(PharmacistDashboardResponseDto.UrgentAlert.builder()
                     .id(alertId++)
                     .type("LOW_STOCK")
-                    .title(outOfStock + " SKU(s) Out of Stock")
-                    .description("Inventory exhausted. Immediate purchase order needed.")
+                    .title(outOfStockGroups + " Generic Group(s) Out of Stock")
+                    .description("Pooled generic inventory exhausted. Immediate purchase order needed.")
                     .severity("critical")
                     .time("Urgent")
                     .build());
@@ -445,14 +482,13 @@ public class DashboardService {
             alerts.add(PharmacistDashboardResponseDto.UrgentAlert.builder()
                     .id(alertId++)
                     .type("LOW_STOCK")
-                    .title(totalLowStock + " SKU(s) Below Minimum Threshold")
-                    .description("Stock dropped below safety buffer. Please reorder.")
+                    .title(totalLowStock + " Generic Group(s) Below Reorder Threshold")
+                    .description("Pooled stock dropped to or below reorder threshold. Please restock.")
                     .severity("warning")
                     .time("Today")
                     .build());
         }
 
-        // 4. Near expiry
         if (totalNearExpiry > 0 && alerts.size() < 3) {
             alerts.add(PharmacistDashboardResponseDto.UrgentAlert.builder()
                     .id(alertId++)

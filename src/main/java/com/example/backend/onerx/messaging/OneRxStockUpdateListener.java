@@ -37,7 +37,7 @@ public class OneRxStockUpdateListener {
         }
 
         try {
-            Optional<Sku> skuOpt = skuRepository.findById(event.skuId());
+            Optional<Sku> skuOpt = skuRepository.findByIdWithSetting(event.skuId());
             if (skuOpt.isEmpty()) {
                 return;
             }

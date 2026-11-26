@@ -24,11 +24,14 @@ public interface ReorderQuotationRepository extends JpaRepository<ReorderQuotati
 
     long countByPharmacyIdAndStatus(Long pharmacyId, ReorderQuotation.Status status);
 
-    @Query("SELECT q FROM ReorderQuotation q " +
+    @Query("SELECT DISTINCT q FROM ReorderQuotation q " +
            "LEFT JOIN FETCH q.pharmacy p " +
            "LEFT JOIN FETCH p.facility " +
+           "LEFT JOIN FETCH q.supplier " +
            "LEFT JOIN FETCH q.user " +
            "LEFT JOIN FETCH q.items i " +
+           "LEFT JOIN FETCH i.genericStockSetting g " +
+           "LEFT JOIN FETCH g.libMedicine " +
            "LEFT JOIN FETCH i.sku " +
            "WHERE q.id = :id")
     Optional<ReorderQuotation> findByIdWithDetails(@Param("id") Long id);
@@ -47,8 +50,9 @@ public interface ReorderQuotationRepository extends JpaRepository<ReorderQuotati
            "     LOWER(q.notes) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "     EXISTS ( " +
            "         SELECT 1 FROM ReorderQuotationItem qi " +
+           "         LEFT JOIN qi.genericStockSetting g " +
+           "         LEFT JOIN g.libMedicine med " +
            "         LEFT JOIN qi.sku sku " +
-           "         LEFT JOIN sku.libMedicine med " +
            "         WHERE qi.quotation = q AND ( " +
            "             LOWER(sku.name) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "             LOWER(sku.brandName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -64,4 +68,3 @@ public interface ReorderQuotationRepository extends JpaRepository<ReorderQuotati
             @Param("search") String search,
             Pageable pageable);
 }
-
