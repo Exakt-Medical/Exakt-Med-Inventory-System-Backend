@@ -21,6 +21,7 @@ public class GenericStockGroupDto {
     private Long medicineId;
     private String drugCode;
     private String genericName;
+    private String classification;
     private String dosageForm;
     private String dosageStrength;
     private String packagingUnit;

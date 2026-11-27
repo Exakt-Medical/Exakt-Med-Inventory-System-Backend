@@ -492,6 +492,7 @@ public class GenericStockSettingService {
                 .medicineId(setting.getLibMedicine() != null ? setting.getLibMedicine().getId() : null)
                 .drugCode(setting.getLibMedicine() != null ? setting.getLibMedicine().getDrugCode() : null)
                 .genericName(setting.getLibMedicine() != null ? setting.getLibMedicine().getDrugDescription() : "")
+                .classification(setting.getLibMedicine() != null ? setting.getLibMedicine().getClassification() : null)
                 .dosageForm(setting.getDosageForm())
                 .dosageStrength(setting.getDosageStrength())
                 .packagingUnit(setting.getPackagingUnit())
@@ -522,6 +523,7 @@ public class GenericStockSettingService {
             dto.setMedicineId(sku.getLibMedicine().getId());
             dto.setDrugCode(sku.getLibMedicine().getDrugCode());
             dto.setDrugDescription(sku.getLibMedicine().getDrugDescription());
+            dto.setClassification(sku.getLibMedicine().getClassification());
         }
         dto.setName(sku.getName());
         dto.setBrandName(sku.getBrandName());

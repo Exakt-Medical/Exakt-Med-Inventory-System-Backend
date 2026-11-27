@@ -1007,6 +1007,7 @@ public class SkuService {
             dto.setMedicineId(sku.getLibMedicine().getId());
             dto.setDrugCode(sku.getLibMedicine().getDrugCode());
             dto.setDrugDescription(sku.getLibMedicine().getDrugDescription());
+            dto.setClassification(sku.getLibMedicine().getClassification());
         }
 
         dto.setName(sku.getName());

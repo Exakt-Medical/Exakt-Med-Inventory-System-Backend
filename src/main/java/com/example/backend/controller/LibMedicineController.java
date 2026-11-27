@@ -27,10 +27,12 @@ public class LibMedicineController {
 
     // 1. GET ALL / SEARCH MEDICINES (Paginated for tables or infinite scroll)
     @GetMapping
-    @Operation(summary = "Search Medicines (Paginated)", description = "Searches reference library medicines with pagination and sorting.")
+    @Operation(summary = "Search Medicines (Paginated)", description = "Searches reference library medicines with pagination, sorting, and optional classification filter (YAKAP / GAMOT).")
     public ResponseEntity<Page<LibMedicineResponseDto>> searchMedicines(
-            @Parameter(description = "Optional search query (drug description or category)")
+            @Parameter(description = "Optional search query (drug description or code)")
             @RequestParam(required = false) String search,
+            @Parameter(description = "Optional classification filter (e.g. YAKAP, GAMOT)")
+            @RequestParam(required = false) String classification,
             @Parameter(description = "Page number (0-based)")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Page size")
@@ -43,7 +45,7 @@ public class LibMedicineController {
                 ? Sort.by(sortBy).descending()
                 : Sort.by(sortBy).ascending();
         Pageable pageable = PageRequest.of(page, size, sort);
-        return ResponseEntity.ok(libMedicineService.searchMedicines(search, pageable));
+        return ResponseEntity.ok(libMedicineService.searchMedicines(search, classification, pageable));
     }
 
     // 2. SEARCH & AUTOCOMPLETE (Fast limited list for frontend dropdown selects)
@@ -52,9 +54,11 @@ public class LibMedicineController {
     public ResponseEntity<List<LibMedicineResponseDto>> getDropdownMedicines(
             @Parameter(description = "Optional search keyword")
             @RequestParam(required = false) String search,
+            @Parameter(description = "Optional classification filter (e.g. YAKAP, GAMOT)")
+            @RequestParam(required = false) String classification,
             @Parameter(description = "Maximum results to return")
             @RequestParam(defaultValue = "50") int limit) {
-        return ResponseEntity.ok(libMedicineService.getDropdownMedicines(search, limit));
+        return ResponseEntity.ok(libMedicineService.getDropdownMedicines(search, classification, limit));
     }
 
     // 3. GET MEDICINE BY ID

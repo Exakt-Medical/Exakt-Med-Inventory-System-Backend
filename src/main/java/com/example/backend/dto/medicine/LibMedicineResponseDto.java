@@ -19,4 +19,5 @@ public class LibMedicineResponseDto {
     private String strengthCode;
     private String unitCode;
     private String packageCode;
+    private String classification;
 }

@@ -21,6 +21,7 @@ public class SkuResponseDto {
     private Long medicineId;
     private String drugCode;
     private String drugDescription;
+    private String classification;
     private String name;
     private String brandName;
     private String dosageForm;

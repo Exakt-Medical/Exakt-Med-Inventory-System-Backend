@@ -38,4 +38,7 @@ public class LibMedicine {
     @Column(name = "package_code", length = 45)
     private String packageCode;
 
+    @Column(name = "classification", length = 50)
+    private String classification;
+
 }

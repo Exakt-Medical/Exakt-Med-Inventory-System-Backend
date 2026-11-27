@@ -102,8 +102,11 @@ CREATE TABLE IF NOT EXISTS lib_medicine (
     form_code VARCHAR(45),
     strength_code VARCHAR(45),
     unit_code VARCHAR(45),
-    package_code VARCHAR(45)
+    package_code VARCHAR(45),
+    classification VARCHAR(50)
 );
+
+CREATE INDEX IF NOT EXISTS idx_lib_medicine_classification ON lib_medicine (classification);
 
 -- Entity: LibPackagingUnit
 CREATE TABLE IF NOT EXISTS lib_packaging_unit (

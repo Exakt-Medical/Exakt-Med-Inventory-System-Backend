@@ -18,8 +18,13 @@ public interface LibMedicineRepository extends JpaRepository<LibMedicine, Long> 
            "(:search IS NULL OR :search = '' OR " +
            "LOWER(m.drugDescription) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "LOWER(m.drugCode) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
-           "LOWER(m.genCode) LIKE LOWER(CONCAT('%', :search, '%')))")
-    Page<LibMedicine> searchMedicines(@Param("search") String search, Pageable pageable);
+           "LOWER(m.genCode) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+           "AND (:classification IS NULL OR :classification = '' OR " +
+           "LOWER(m.classification) LIKE LOWER(CONCAT('%', :classification, '%')))")
+    Page<LibMedicine> searchMedicines(
+            @Param("search") String search,
+            @Param("classification") String classification,
+            Pageable pageable);
 
     Optional<LibMedicine> findByDrugCode(String drugCode);
 

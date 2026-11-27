@@ -26,18 +26,30 @@ public class LibMedicineService {
     // 1. SEARCH MEDICINES (Paginated - for tables, lists, or infinite scroll)
     @PreAuthorize("isAuthenticated()")
     public Page<LibMedicineResponseDto> searchMedicines(String search, Pageable pageable) {
+        return searchMedicines(search, null, pageable);
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    public Page<LibMedicineResponseDto> searchMedicines(String search, String classification, Pageable pageable) {
         String query = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        return libMedicineRepository.searchMedicines(query, pageable)
+        String classFilter = (classification != null && !classification.trim().isEmpty()) ? classification.trim() : null;
+        return libMedicineRepository.searchMedicines(query, classFilter, pageable)
                 .map(this::mapToResponseDto);
     }
 
     // 2. DROPDOWN SEARCH (Fast limited results - for dropdowns and autocomplete selects)
     @PreAuthorize("isAuthenticated()")
     public List<LibMedicineResponseDto> getDropdownMedicines(String search, int limit) {
+        return getDropdownMedicines(search, null, limit);
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    public List<LibMedicineResponseDto> getDropdownMedicines(String search, String classification, int limit) {
         int effectiveLimit = (limit <= 0) ? 50 : Math.min(limit, 200);
         Pageable pageable = PageRequest.of(0, effectiveLimit, Sort.by("drugDescription").ascending());
         String query = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        return libMedicineRepository.searchMedicines(query, pageable)
+        String classFilter = (classification != null && !classification.trim().isEmpty()) ? classification.trim() : null;
+        return libMedicineRepository.searchMedicines(query, classFilter, pageable)
                 .map(this::mapToResponseDto)
                 .getContent();
     }
@@ -69,7 +81,8 @@ public class LibMedicineService {
                 medicine.getFormCode(),
                 medicine.getStrengthCode(),
                 medicine.getUnitCode(),
-                medicine.getPackageCode()
+                medicine.getPackageCode(),
+                medicine.getClassification()
         );
     }
 }
